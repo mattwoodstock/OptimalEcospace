@@ -5,7 +5,7 @@ library(ggplot2)
 library(terra)
 library(raster)
 
-dir_in  = "./inputs/dbSeaBed/"
+dir_in  = "./data/dbSeaBed"
 dir_out = "./outputs-for-ewe/sediments/"
 dir_fig = "./figures/"
 
