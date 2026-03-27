@@ -5,16 +5,20 @@ library(ggplot2)
 library(terra)
 library(raster)
 
-dir_in  = "./inputs/dbSeaBed/"
-dir_out = "./outputs-for-ewe/sediments/"
-dir_fig = "./figures/"
+dir_in  = "../Inputs/dbSeaBed"
+dir_out = "./Outputs-for-ewe/Seabed/"
+dir_fig = "./Figures/"
 
-depth = terra::rast("./inputs/NGoM/basemap.asc")
+## Read in seabed
+seabed  = sf::st_read(file.path(dir_in, "usSEABED_GOM_Sediments.shp"))
+
+## Read in depth
+depth = terra::rast("../Inputs/NGoM/basemap.asc")
 plot(depth)
+
 
 ##------------------------------------------------------------------------------
 ## Seabed sediment composition 
-seabed  = sf::st_read(file.path(dir_in, "usSEABED_GOM_Sediments.shp"))
 
 ## The attributes are denoted by the grid filenames: 
 ## gma_rckv - gridded values substrate rock presence (% exposure); computed with CS Interpolator; max 5km search radius 
@@ -39,11 +43,23 @@ sf::st_crs(seabed)
 plot(depth, main = "Depth + seabed footprint")
 plot(sf::st_geometry(seabed), add = TRUE, border = "red", lwd = 0.5)
 
+## Fix depth
+lat_max <- 30.5
+lat_min <- 29.0
+lon_min <- -88.5
+lon_max <- -85.5
+
+depth_fix <- depth
+terra::ext(depth_fix) <- c(lon_min, lon_max, lat_min, lat_max)
+
+plot(depth_fix, main = "Depth with corrected extent")
+plot(sf::st_geometry(seabed), add = TRUE, border = "red", lwd = 0.5)
+
 ## Rasterize polygons
-rckv <- terra::rasterize(seabed, depth, field = "gom_rckv")
-gvlv <- terra::rasterize(seabed, depth, field = "gom_gvlv")
-sndv <- terra::rasterize(seabed, depth, field = "gom_sndv")
-mudv <- terra::rasterize(seabed, depth, field = "gom_mudv")
+rckv <- terra::rasterize(seabed, depth_fix, field = "gom_rckv")
+gvlv <- terra::rasterize(seabed, depth_fix, field = "gom_gvlv")
+sndv <- terra::rasterize(seabed, depth_fix, field = "gom_sndv")
+mudv <- terra::rasterize(seabed, depth_fix, field = "gom_mudv")
 
 ## Change -99 to NA
 rckv[rckv < 0] <- NA
@@ -58,15 +74,25 @@ sndv <- sndv / max(values(sndv), na.rm=T)
 mudv <- mudv / max(values(mudv), na.rm=T)
 
 ## Figure
-#png(paste0(dir_fig, "Ecospace-seabed-types.png"), 
-#    width = 9, height = 6, units = "in", res=1200)
+png(paste0(dir_fig, "Ecospace-seabed-types.png"), 
+    width = 9, height = 6, units = "in", res=1200)
 par(mfrow=c(2,2))
 plot(rckv, colNA = "gray", main = "Rock"); plot(gvlv, colNA = "gray", main = "Gravel")
 plot(sndv, colNA = "gray", main = "Sand");  plot(mudv, colNA = "gray", main = "Mud");  
 dev.off()
+par(mfrow=c(1,1))
 
-## Write out ASCII files for ecospace
-terra::writeRaster(rckv, paste0(dir_out, "/seabed-sedcomp-rock"),   format = 'ascii', overwrite=TRUE)
-terra::writeRaster(gvlv, paste0(dir_out, "/seabed-sedcomp-gravel"), format = 'ascii', overwrite=TRUE)
-terra::writeRaster(sndv, paste0(dir_out, "/seabed-sedcomp-sand"),   format = 'ascii', overwrite=TRUE)
-terra::writeRaster(mudv, paste0(dir_out, "/seabed-sedcomp-mud"),    format = 'ascii', overwrite=TRUE)
+## Write out ASCII files for Ecospace
+if(!dir.exists(dir_out)) dir.create(dir_out, recursive = TRUE) ## Create output directory if needed
+
+terra::writeRaster(rckv, file.path(dir_out, "sedcomp-rock.asc"),
+                   filetype = "AAIGrid", overwrite = TRUE)
+
+terra::writeRaster(gvlv, file.path(dir_out, "sedcomp-gravel.asc"),
+                   filetype = "AAIGrid", overwrite = TRUE)
+
+terra::writeRaster(sndv, file.path(dir_out, "sedcomp-sand.asc"),
+                   filetype = "AAIGrid", overwrite = TRUE)
+
+terra::writeRaster(mudv, file.path(dir_out, "sedcomp-mud.asc"),
+                   filetype = "AAIGrid", overwrite = TRUE)
