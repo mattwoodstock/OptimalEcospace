@@ -1,0 +1,356 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <Platform>Microsoft Windows NT 10.0.26200.0</Platform>
+  <Is64BitOS>True</Is64BitOS>
+  <ModelName>NGoM_v2-5 clean</ModelName>
+  <Created>3:12:23 PM Friday, March 27, 2026</Created>
+<Session_Started
+  Date="3:12:23 PM Friday, March 27, 2026">
+  <Model>NGoM_v2-5 clean</Model>
+  <LogFile>C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_v2-5 clean_log.xml</LogFile>
+  <Is64BitExe>True</Is64BitExe>
+  <CultureOS>English (United States)</CultureOS>
+  <CultureUI>English (United States)</CultureUI>
+  <DecimalSeparator>.</DecimalSeparator>
+</Session_Started>
+<Information_Message
+  Date="3:12:23 PM Friday, March 27, 2026">
+  <Message>Ecopath model 'C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_v2-5 clean.eweaccdb' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:12:31 PM Friday, March 27, 2026">
+  <Message>Ecopath run completed.</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="3:12:31 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:12:31 PM Friday, March 27, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:12:31 PM Friday, March 27, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="3:12:32 PM Friday, March 27, 2026">
+  <Message>Ecosim scenario 'sim7_ts2 custom settings' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecosim</Message_Source>
+  <Message_DataType>EcoSimScenario</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="3:12:33 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="3:12:33 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Information_Message
+  Date="3:12:51 PM Friday, March 27, 2026">
+  <Message>Data successfully saved to 'C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Inputs\NGoM\structures.asc'</Message>
+  <Message_Type>DataExport</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Question_Message
+  Date="3:20:05 PM Friday, March 27, 2026">
+  <Message>Unsaved changes in Ecopath and Ecospace will be lost if you proceed. Do you wish to save these changes?</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Core</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+  <Message_Reply>YES</Message_Reply>
+  <Message_Suppressable>False</Message_Suppressable>
+  <Message_Suppressed>False</Message_Suppressed>
+</Question_Message>
+<Information_Message
+  Date="3:20:09 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario 'test1' has been saved.</Message>
+  <Message_Type>DataModified</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:20:15 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario 'test1' has been saved.</Message>
+  <Message_Type>DataModified</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="3:20:15 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:20:15 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="3:20:16 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Question_Message
+  Date="3:20:30 PM Friday, March 27, 2026">
+  <Message>You are about to reduce the size of the map, values outside the new map area will be lost. This operation cannot be undone. Are you sure you want to proceed?</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+  <Message_Reply>NO</Message_Reply>
+  <Message_Suppressable>False</Message_Suppressable>
+  <Message_Suppressed>False</Message_Suppressed>
+</Question_Message>
+<Log_Message
+  Date="3:20:32 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:20:32 PM Friday, March 27, 2026">
+  <Message>EwECore.cCore.LoadEcospaceScenario(...) Error: EwECore.cEcospaceDataStructures.ReDimMapDims() Error: Index was outside the bounds of the array.</Message>
+</Log_Message>
+<Warning_Message
+  Date="3:20:32 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario 'test1' failed to load. EwECore.cEcospaceDataStructures.ReDimMapDims() Error: Index was outside the bounds of the array.</Message>
+  <Message_Type>ErrorEncountered</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Warning_Message>
+<Log_Message
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Exception_Messages
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Detail>cEwEFormStateHelper.UpdateFormState(frmEcospaceMap)</Detail>
+  <Exception>
+    <Type>System.InvalidOperationException</Type>
+    <Source>System.Windows.Forms</Source>
+    <Message>Value Close() cannot be called while doing CreateHandle().</Message>
+  </Exception>
+  <StackTrace>
+    <Method>
+      <Name>Close</Name>
+      <Line>0</Line>
+    </Method>
+    <Method>
+      <Name>UpdateFormStates</Name>
+      <Line>0</Line>
+    </Method>
+  </StackTrace>
+</Exception_Messages>
+<Log_Message
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Exception_Messages
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Detail>cEwEFormStateHelper.UpdateFormState(frmEcospaceMap)</Detail>
+  <Exception>
+    <Type>System.InvalidOperationException</Type>
+    <Source>System.Windows.Forms</Source>
+    <Message>Value Close() cannot be called while doing CreateHandle().</Message>
+  </Exception>
+  <StackTrace>
+    <Method>
+      <Name>Close</Name>
+      <Line>0</Line>
+    </Method>
+    <Method>
+      <Name>UpdateFormStates</Name>
+      <Line>0</Line>
+    </Method>
+  </StackTrace>
+</Exception_Messages>
+<Log_Message
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Exception_Messages
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Detail>cEwEFormStateHelper.UpdateFormState(frmEcospaceMap)</Detail>
+  <Exception>
+    <Type>System.InvalidOperationException</Type>
+    <Source>System.Windows.Forms</Source>
+    <Message>Value Close() cannot be called while doing CreateHandle().</Message>
+  </Exception>
+  <StackTrace>
+    <Method>
+      <Name>Close</Name>
+      <Line>0</Line>
+    </Method>
+    <Method>
+      <Name>UpdateFormStates</Name>
+      <Line>0</Line>
+    </Method>
+  </StackTrace>
+</Exception_Messages>
+<Log_Message
+  Date="3:20:37 PM Friday, March 27, 2026">
+  <Message>Model closed</Message>
+</Log_Message>
+<Session_Started
+  Date="3:21:13 PM Friday, March 27, 2026">
+  <Model>NGoM_v2-5 clean</Model>
+  <LogFile>C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_v2-5 clean_log.xml</LogFile>
+  <Is64BitExe>True</Is64BitExe>
+  <CultureOS>English (United States)</CultureOS>
+  <CultureUI>English (United States)</CultureUI>
+  <DecimalSeparator>.</DecimalSeparator>
+</Session_Started>
+<Information_Message
+  Date="3:21:13 PM Friday, March 27, 2026">
+  <Message>Ecopath model 'C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_v2-5 clean.eweaccdb' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:21:24 PM Friday, March 27, 2026">
+  <Message>Ecopath run completed.</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="3:21:24 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:21:24 PM Friday, March 27, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="3:21:24 PM Friday, March 27, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="3:21:24 PM Friday, March 27, 2026">
+  <Message>Ecosim scenario 'sim7_ts2 custom settings' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecosim</Message_Source>
+  <Message_DataType>EcoSimScenario</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="3:21:25 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="3:21:26 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Information_Message
+  Date="3:21:36 PM Friday, March 27, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Inputs\NGoM\1min_NGoM_bathymetry.asc read successfully into layer Depth</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Critical_Message
+  Date="3:22:39 PM Friday, March 27, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Inputs\NGoM\structures_1arcmin.asc could not be read into layer artificial reef</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Critical_Message>
+<Information_Message
+  Date="3:24:52 PM Friday, March 27, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Inputs\NGoM\structures.asc read successfully into layer artificial reef</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:25:14 PM Friday, March 27, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Inputs\NGoM\structures.asc read successfully into layer artificial reef</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Information_Message
+  Date="3:28:39 PM Friday, March 27, 2026">
+  <Message>Ecospace has completed a model run.</Message>
+  <Message_Type>EcospaceRunCompleted</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:33:02 PM Friday, March 27, 2026">
+  <Message>Ecospace has completed a model run.</Message>
+  <Message_Type>EcospaceRunCompleted</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:33:47 PM Friday, March 27, 2026">
+  <Message>Ecospace has completed a model run.</Message>
+  <Message_Type>EcospaceRunCompleted</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:37:35 PM Friday, March 27, 2026">
+  <Message>Ecospace has completed a model run.</Message>
+  <Message_Type>EcospaceRunCompleted</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Information_Message
+  Date="3:41:05 PM Friday, March 27, 2026">
+  <Message>Ecospace has completed a model run.</Message>
+  <Message_Type>EcospaceRunCompleted</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="3:44:52 PM Friday, March 27, 2026">
+  <Message>Ecospace has completed a model run.</Message>
+  <Message_Type>EcospaceRunCompleted</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+</doc>
