@@ -8,5 +8,5 @@ This repository houses the methodology to turn the Ecospace console into an opti
 
 <p align="center">
   <img src="./R/Figures/Ecospace-seabed-types.png" width="80%" alt="Bathymetry map"><br>
-  <i><b>Figure 1.</b> Initial seabed types embedded in the model.</i>
+  <i><b>Figure 2.</b> Initial seabed types embedded in the model.</i>
 </p>
