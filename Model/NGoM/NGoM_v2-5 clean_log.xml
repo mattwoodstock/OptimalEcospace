@@ -353,4 +353,28 @@
   <Message_Source>Ecospace</Message_Source>
   <Message_DataType>NotSet</Message_DataType>
 </Information_Message>
+<Log_Message
+  Date="6:19:29 PM Friday, March 27, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="6:19:29 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="6:19:29 PM Friday, March 27, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="6:19:29 PM Friday, March 27, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="6:19:29 PM Friday, March 27, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="6:19:29 PM Friday, March 27, 2026">
+  <Message>Model closed</Message>
+</Log_Message>
 </doc>
