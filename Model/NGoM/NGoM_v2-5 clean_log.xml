@@ -377,4 +377,255 @@
   Date="6:19:29 PM Friday, March 27, 2026">
   <Message>Model closed</Message>
 </Log_Message>
+<Session_Started
+  Date="10:55:44 AM Wednesday, April 15, 2026">
+  <Model>NGoM_v2-5 clean</Model>
+  <LogFile>C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_v2-5 clean_log.xml</LogFile>
+  <Is64BitExe>True</Is64BitExe>
+  <CultureOS>English (United States)</CultureOS>
+  <CultureUI>English (United States)</CultureUI>
+  <DecimalSeparator>.</DecimalSeparator>
+</Session_Started>
+<Information_Message
+  Date="10:55:44 AM Wednesday, April 15, 2026">
+  <Message>Ecopath model 'C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_v2-5 clean.eweaccdb' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="10:56:01 AM Wednesday, April 15, 2026">
+  <Message>Ecopath run completed.</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="10:56:01 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="10:56:01 AM Wednesday, April 15, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="10:56:01 AM Wednesday, April 15, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="10:56:01 AM Wednesday, April 15, 2026">
+  <Message>Ecosim scenario 'sim7_ts2 custom settings' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecosim</Message_Source>
+  <Message_DataType>EcoSimScenario</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="10:56:02 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="10:56:03 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Question_Message
+  Date="10:57:39 AM Wednesday, April 15, 2026">
+  <Message>You are about to reduce the size of the map, values outside the new map area will be lost. This operation cannot be undone. Are you sure you want to proceed?</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+  <Message_Reply>NO</Message_Reply>
+  <Message_Suppressable>False</Message_Suppressable>
+  <Message_Suppressed>False</Message_Suppressed>
+</Question_Message>
+<Information_Message
+  Date="10:57:44 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario 'test1' has been saved.</Message>
+  <Message_Type>DataModified</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="10:57:44 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="10:57:44 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="10:57:45 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="10:58:57 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="10:58:57 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="10:59:37 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\Seabed\sedcomp-gravel.asc read successfully into layer gravel</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="10:59:45 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\Seabed\sedcomp-rock.asc read successfully into layer rock</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="10:59:52 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\Seabed\sedcomp-mud.asc read successfully into layer mud</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="11:00:00 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\Seabed\sedcomp-sand.asc read successfully into layer sand</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Question_Message
+  Date="11:04:33 AM Wednesday, April 15, 2026">
+  <Message>Are you sure you want to delete layer 'artificial reef'? This action cannot be undone.</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Core</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+  <Message_Reply>CANCEL</Message_Reply>
+  <Message_Suppressable>False</Message_Suppressable>
+  <Message_Suppressed>False</Message_Suppressed>
+</Question_Message>
+<Question_Message
+  Date="11:04:35 AM Wednesday, April 15, 2026">
+  <Message>Are you sure you want to delete layer 'natural hardbottom'? This action cannot be undone.</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Core</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+  <Message_Reply>CANCEL</Message_Reply>
+  <Message_Suppressable>False</Message_Suppressable>
+  <Message_Suppressed>False</Message_Suppressed>
+</Question_Message>
+<Question_Message
+  Date="11:04:36 AM Wednesday, April 15, 2026">
+  <Message>Unsaved changes in Ecopath and Ecospace will be lost if you proceed. Do you wish to save these changes?</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Core</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+  <Message_Reply>YES</Message_Reply>
+  <Message_Suppressable>False</Message_Suppressable>
+  <Message_Suppressed>False</Message_Suppressed>
+</Question_Message>
+<Information_Message
+  Date="11:04:40 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario 'test1' has been saved.</Message>
+  <Message_Type>DataModified</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="11:04:44 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="11:04:45 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="11:05:54 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="11:05:54 AM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="11:06:08 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tos\tos_1993-01.asc read successfully into layer tos</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="11:06:33 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tos\tos_1993-02.asc read successfully into layer tos</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="11:11:29 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tos\tos_1993-01.asc read successfully into layer tos</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Information_Message
+  Date="11:15:36 AM Wednesday, April 15, 2026">
+  <Message>File C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tos\tos_1993-01.asc read successfully into layer tos</Message>
+  <Message_Type>DataImport</Message_Type>
+  <Message_Source>External</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Entry>
+  <Formcannotberesolved>frmEwE6 cmdNavigate OnInvoke</Formcannotberesolved>
+</Entry>
+<Information_Message
+  Date="12:07:52 PM Wednesday, April 15, 2026">
+  <Message>Ecospace has completed a model run.</Message>
+  <Message_Type>EcospaceRunCompleted</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="9:29:30 PM Wednesday, April 15, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="9:29:30 PM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="9:29:30 PM Wednesday, April 15, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="9:29:30 PM Wednesday, April 15, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="9:29:30 PM Wednesday, April 15, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="9:29:31 PM Wednesday, April 15, 2026">
+  <Message>Model closed</Message>
+</Log_Message>
 </doc>
