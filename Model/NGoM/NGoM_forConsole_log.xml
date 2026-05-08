@@ -1,0 +1,185 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <Platform>Microsoft Windows NT 6.2.9200.0</Platform>
+  <Is64BitOS>True</Is64BitOS>
+  <ModelName>NGoM_forConsole</ModelName>
+  <Created>5:37:18 PM Friday, May 8, 2026</Created>
+<Session_Started
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Model>NGoM_forConsole</Model>
+  <LogFile>C:\Users\msw200\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_forConsole_log.xml</LogFile>
+  <Is64BitExe>True</Is64BitExe>
+  <CultureOS>English (United States)</CultureOS>
+  <CultureUI>English (United States)</CultureUI>
+  <DecimalSeparator>.</DecimalSeparator>
+</Session_Started>
+<Log_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Core</Message>
+</Log_Message>
+<Information_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>Ecopath model 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_forConsole.eweaccdb' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecopath</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>Ecopath run completed.</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:37:18 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecopath</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:20 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = MSE</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:20 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = MSE</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:20 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = MSE</Message>
+</Log_Message>
+<Information_Message
+  Date="5:37:20 PM Friday, May 8, 2026">
+  <Message>Ecosim scenario 'sim7_ts2 custom settings' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecosim</Message_Source>
+  <Message_DataType>EcoSimScenario</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:37:20 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecosim</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:20 PM Friday, May 8, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="5:37:22 PM Friday, May 8, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:37:22 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecospace</Message>
+</Log_Message>
+<Log_Message
+  Date="5:37:24 PM Friday, May 8, 2026">
+  <Message>Started Ecospace run with 0 configured connection(s), start year 2009</Message>
+</Log_Message>
+<Session_Started
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Model>NGoM_forConsole</Model>
+  <LogFile>C:\Users\msw200\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_forConsole_log.xml</LogFile>
+  <Is64BitExe>True</Is64BitExe>
+  <CultureOS>English (United States)</CultureOS>
+  <CultureUI>English (United States)</CultureUI>
+  <DecimalSeparator>.</DecimalSeparator>
+</Session_Started>
+<Log_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Core</Message>
+</Log_Message>
+<Information_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>Ecopath model 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_forConsole.eweaccdb' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecopath</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>Ecotracer scenario closed</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>Ecosim scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>Ecopath run completed.</Message>
+  <Message_Type>Any</Message_Type>
+  <Message_Source>Ecopath</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:40:11 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecopath</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:13 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = MSE</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:13 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = MSE</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:13 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = MSE</Message>
+</Log_Message>
+<Information_Message
+  Date="5:40:13 PM Friday, May 8, 2026">
+  <Message>Ecosim scenario 'sim7_ts2 custom settings' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecosim</Message_Source>
+  <Message_DataType>EcoSimScenario</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:40:13 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecosim</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:13 PM Friday, May 8, 2026">
+  <Message>Ecospace scenario closed</Message>
+</Log_Message>
+<Information_Message
+  Date="5:40:15 PM Friday, May 8, 2026">
+  <Message>Ecospace scenario 'test1' loaded.</Message>
+  <Message_Type>DataAddedOrRemoved</Message_Type>
+  <Message_Source>Ecospace</Message_Source>
+  <Message_DataType>NotSet</Message_DataType>
+</Information_Message>
+<Log_Message
+  Date="5:40:15 PM Friday, May 8, 2026">
+  <Message>EwECore.cMessagePublisher.SendMessage(...) No default message handler defined for source = Ecospace</Message>
+</Log_Message>
+<Log_Message
+  Date="5:40:18 PM Friday, May 8, 2026">
+  <Message>Started Ecospace run with 0 configured connection(s), start year 2009</Message>
+</Log_Message>
+</doc>

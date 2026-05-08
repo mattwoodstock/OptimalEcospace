@@ -5,7 +5,7 @@
       <Name>tos_hindcast</Name>
       <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerDriver</Variable>
-      <Source IsRelative="False">C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tos</Source>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tos</Source>
       <Seasonal EndDate="2100-01-01">False</Seasonal>
       <Files>
         <File Date="2009-01-01">tos_2009-01.asc</File>
@@ -196,7 +196,7 @@
       <Name>sos_hindcast</Name>
       <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerDriver</Variable>
-      <Source IsRelative="False">C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\sos</Source>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\sos</Source>
       <Seasonal EndDate="2100-01-01">False</Seasonal>
       <Files>
         <File Date="2009-01-01">sos_2009-01.asc</File>
@@ -387,7 +387,7 @@
       <Name>sob_hindcast</Name>
       <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerDriver</Variable>
-      <Source IsRelative="False">C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\sob</Source>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\sob</Source>
       <Seasonal EndDate="2100-01-01">False</Seasonal>
       <Files>
         <File Date="2009-01-01">sob_2009-01.asc</File>
@@ -578,7 +578,7 @@
       <Name>tob_hindcast</Name>
       <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerDriver</Variable>
-      <Source IsRelative="False">C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tob</Source>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\tob</Source>
       <Seasonal EndDate="2100-01-01">False</Seasonal>
       <Files>
         <File Date="2009-01-01">tob_2009-01.asc</File>
@@ -769,7 +769,7 @@
       <Name>npp_hindcast</Name>
       <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerRelPP</Variable>
-      <Source IsRelative="False">C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\wc_vert_int_npp</Source>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\R\Outputs-for-ewe\EnvironmentalData\MOM6Hindcast\wc_vert_int_npp</Source>
       <Seasonal EndDate="2100-01-01">False</Seasonal>
       <Files>
         <File Date="2009-01-01">wc_vert_int_npp_2009-01.asc</File>
