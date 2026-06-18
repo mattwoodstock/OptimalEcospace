@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<?xml version="1.0" standalone="yes"?>
 <Datasets Name="NGoMSTConfig" Author="msw200" Contact="" Station="UM-3CHKF64" Description="">
   <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cSingleFileDataSetPlugin" GUID="08e81913-15bb-41bd-855e-b0e6167305fe">
     <Configuration>

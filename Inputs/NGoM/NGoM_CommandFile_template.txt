@@ -42,7 +42,7 @@ End Enum
 
 -----Inputs model and spatail temporal config-----
 <EWE_MODEL_FILE>, C:\Users\msw200\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_forConsole.eweaccdb, System.String
-<SPATIAL_CONFIG_FILE>, C:\Users\msw200\Documents\Ecopath\GIST\Model\GISTSTConfig.xml, System.String
+<SPATIAL_CONFIG_FILE>, C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\NGoMSTConfig.xml, System.String
 
 -----Scenarios and Ecospace run type-----
 <MODEL_RUN_TYPE>, 1, System.Int32, Type of run 1 is a normal Ecospace Run, 2 is NGOMEX scenarios, 3 is Ecospace MonteCarlo
@@ -58,7 +58,7 @@ End Enum
 
 -----Output and saving-----
 <ECOSPACE_USE_CORE_OUPUT_DIR>, False, System.Boolean
-<ECOSPACE_OUTPUT_DIR>, C:\Users\msw200\Documents\Ecopath\GIST\Calibration\Output, System.String
+<ECOSPACE_OUTPUT_DIR>, C:\Users\msw200\Documents\GitHub\OptimalEcospace\Outputs\NGoM, System.String
 <ECOSPACE_USE_ANNUAL_OUTPUT>, True, System.Boolean, Output monthly maps and spatially averaged .csv files
 <ECOSPACE_SAVE_AVERAGED_BIOMASS>, True, System.Boolean, Save the spatially averaged biomass .csv file (time series)
 <ECOSPACE_SAVE_MAP_BIOMASS>, False, System.Boolean

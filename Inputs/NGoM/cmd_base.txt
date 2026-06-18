@@ -41,8 +41,8 @@ End Enum
 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 -----Inputs model and spatail temporal config-----
-<EWE_MODEL_FILE>, C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_v2-5 console.eweaccdb, System.String
-<SPATIAL_CONFIG_FILE>, C:\Users\msw200\OneDrive - University of Miami\Documents\GitHub\OptimalEcospace\Inputs\NGoM\STConfig.xml, System.String
+<EWE_MODEL_FILE>, C:\Users\msw200\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_forConsole.eweaccdb, System.String
+<SPATIAL_CONFIG_FILE>, C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\NGoMSTConfig.xml, System.String
 
 -----Scenarios and Ecospace run type-----
 <MODEL_RUN_TYPE>, 1, System.Int32, Type of run 1 is a normal Ecospace Run, 2 is NGOMEX scenarios, 3 is Ecospace MonteCarlo
@@ -54,7 +54,7 @@ End Enum
 <N_ECOSPACE_TIMESTEPS_YEAR>, 12, System.Int32
 <ECOSPACE_USE_SPINUP>, True, System.Boolean
 <ECOSPACE_SPINUP_LENGTH>, 5, System.Int32
-<N_ECOSPACE_YEARS>, 24, System.Int32, Run length in years
+<N_ECOSPACE_YEARS>, 30, System.Int32, Run length in years
 
 -----Output and saving-----
 <ECOSPACE_USE_CORE_OUPUT_DIR>, False, System.Boolean

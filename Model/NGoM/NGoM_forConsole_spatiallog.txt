@@ -1,0 +1,70 @@
+"<HEADER software/>"
+EwEVersion,"6.7.0.19431 (compiled 2/13/1959)"
+Date,"6/17/2026 8:45:45 PM"
+"<HEADER ecopath/>"
+ModelName,NGoM_v2-5
+ModelSource,C:\Users\msw200\Documents\GitHub\OptimalEcospace\Model\NGoM\NGoM_forConsole.eweaccdb
+"<HEADER ecosim/>"
+EcosimScenario,"sim7_ts2 custom settings"
+TimeSeries,-
+StartYear,2009
+"<HEADER ecospace/>"
+EcospaceScenario,test1
+MapRows,32
+MapCols,58
+MapCellLength,4.2064
+MapCellSize,0.03785016
+MapLatitude,31.4647
+MapLongitude,-88.2306
+NoActiveCells,1726
+EcoSpaceTimeStepLength,0.0833333333333333
+CoordinateSystemWKT,"GEOGCS['WGS 84', DATUM['WGS_1984', SPHEROID['WGS 84',6378137,298.257223563, AUTHORITY['EPSG','7030']], AUTHORITY['EPSG','6326']], PRIMEM['Greenwich',0, AUTHORITY['EPSG','8901']], UNIT['degree',0.01745329251994328, AUTHORITY['EPSG','9122']], AUTHORITY['EPSG','4326']]"
+ExternalDataConfigFile,C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\NGoMSTConfig.xml
+"Layer 1 artificial reef",structures_all
+"Layer 2 gravel",gravel
+"Layer 3 rock",rock
+"Layer 4 mud",mud
+"Layer 5 sand",sand
+"<HEADER end/>"
+
+Ecospace spatial operations log
+Message	Information	Accessing external data into Habitat (artificial reef) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\structures_all.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (gravel) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\gravel.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (rock) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\rock.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (mud) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\mud.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (sand) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\sand.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (artificial reef) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\structures_all.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (gravel) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\gravel.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (rock) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\rock.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (mud) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\mud.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
+Message	Information	Accessing external data into Habitat (sand) at step 1 (2009/01)
+Status	OK	Loaded data from 'C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\sand.asc'
+Status	ValueComputed	Projected to GEOGCS["WGS 84", DATUM["WGS_1984", SPHEROID["WGS 84",6378137,298.257223563, AUTHORITY["EPSG","7030"]], AUTHORITY["EPSG","6326"]], PRIMEM["Greenwich",0, AUTHORITY["EPSG","8901"]], UNIT["degree",0.01745329251994328, AUTHORITY["EPSG","9122"]], AUTHORITY["EPSG","4326"]]
+
