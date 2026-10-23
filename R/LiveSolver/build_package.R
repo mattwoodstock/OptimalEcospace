@@ -1,0 +1,73 @@
+#####################################################
+### Live Solver: build the download package       ###
+###                                               ###
+### Purpose: Assemble a zip with only the files   ###
+###  the Live Solver needs to run: the app, the   ###
+###  launcher, each region's model file and the   ###
+###  rasters/configs used to rebuild habitats.    ###
+###  Sediment source data, model backups and      ###
+###  other working files are left out.            ###
+###                                               ###
+### Usage (from the repository root):             ###
+###   Rscript R/LiveSolver/build_package.R [out]  ###
+### Writes <out>/OptimalEcospace-LiveSolver.zip   ###
+### (default out = "dist").                       ###
+#####################################################
+
+args <- commandArgs(trailingOnly = TRUE)
+repo_root <- normalizePath(".", winslash = "/")
+if (!file.exists(file.path(repo_root, "R/LiveSolver/solver_engine.R"))) stop("Run this from the repository root.")
+out_dir  <- if (length(args)) args[1] else "dist"
+pkg_name <- "OptimalEcospace-LiveSolver"
+
+source(file.path(repo_root, "R/LiveSolver/solver_engine.R"))
+
+# App and launcher ----
+files <- c("Start Live Solver.bat",
+           file.path("R/LiveSolver", c("app.R", "solver_engine.R", "launch.R", "run_headless.R", "README.md")))
+
+# Per region: the model named in the command template + every map/config a run reads ----
+defaults <- ls_default_config(repo_root)
+for (reg in list.dirs(file.path(repo_root, "Inputs"), full.names = FALSE, recursive = FALSE)) {
+  inputs_dir <- file.path(repo_root, "Inputs", reg)
+  info <- ls_region_info(inputs_dir)
+  if (is.na(info$cmd_template) || is.na(info$stconfig)) next
+
+  tmpl  <- readLines(info$cmd_template, warn = FALSE)
+  mline <- grep("^\\s*<EWE_MODEL_FILE>\\s*,", tmpl, value = TRUE)
+  model <- if (length(mline)) basename(gsub("\\\\", "/", trimws(strsplit(mline[1], ",")[[1]][2]))) else NA
+  model_rel <- file.path("Model", reg, model)
+  if (is.na(model) || !file.exists(file.path(repo_root, model_rel))) {
+    message("Skipping region ", reg, ": model named in the command template was not found (", model_rel, ")")
+    next
+  }
+
+  rel <- function(f) sub(paste0("^", repo_root, "/"), "", normalizePath(f, winslash = "/"))
+  maps <- c(info$layers$file[info$layers$exists],
+            file.path(inputs_dir, c(defaults$layers$basemap_file,
+                                    defaults$install$exclusions_file,
+                                    defaults$install$cost_map_file)))
+  maps <- maps[file.exists(maps)]
+  files <- c(files, model_rel, rel(info$stconfig), rel(info$cmd_template), vapply(maps, rel, ""))
+}
+files <- unique(files)
+
+# Assemble and zip ----
+stage <- file.path(tempfile("lspkg"), pkg_name)
+for (f in files) {
+  dir.create(dirname(file.path(stage, f)), recursive = TRUE, showWarnings = FALSE)
+  if (!file.copy(file.path(repo_root, f), file.path(stage, f))) stop("Could not copy ", f)
+}
+
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+zip_path <- normalizePath(file.path(out_dir, paste0(pkg_name, ".zip")), winslash = "/", mustWork = FALSE)
+unlink(zip_path)
+old <- setwd(dirname(stage))
+status <- utils::zip(zip_path, pkg_name, flags = "-r9Xq")
+setwd(old)
+if (status != 0) stop("zip failed (status ", status, ")")
+
+sizes <- file.size(file.path(repo_root, files))
+message(paste(sprintf("%-60s %8.1f KB", files, sizes / 1024), collapse = "\n"))
+message(sprintf("\n%d files, %.1f MB unpacked -> %s (%.1f MB)",
+                length(files), sum(sizes) / 2^20, zip_path, file.size(zip_path) / 2^20))

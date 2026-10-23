@@ -6,7 +6,7 @@ An interactive (Shiny) front end for the OptimalEcospace optimization loop. You 
 
 1. Install **R** from https://cloud.r-project.org. RStudio (https://posit.co/download/rstudio-desktop/) is optional.
 2. For real scenarios, install the **Ecospace console** (`EwEClientConsole.exe`, Windows). Without it the app still runs in **test mode**, which uses made-up scores so you can learn the interface.
-3. Download this repository (green **Code** button → **Download ZIP**) and unzip it, ideally to a short path such as `C:\OptimalEcospace`.
+3. Download **[OptimalEcospace-LiveSolver.zip](https://github.com/mattwoodstock/OptimalEcospace/releases/download/live-solver/OptimalEcospace-LiveSolver.zip)** (about 1.5 MB) and unzip it, ideally to a short path such as `C:\OptimalEcospace`. It contains only what the Live Solver needs (see *Building the download* below). Cloning the whole repository works too.
 4. Start the app:
    * **Windows:** double-click `Start Live Solver.bat` in the repository folder.
    * **RStudio:** open `R/LiveSolver/launch.R` and click **Source**.
@@ -48,6 +48,18 @@ Rscript run_headless.R path/to/config.json
 * **Add iterations** extends a session that is going well.
 * **Re-score** applies edited objective weights and directions to every run so far. The evolutionary search then follows the new ranking.
 * The composite score is the weighted sum of min–max normalised objectives over all finished runs. A run is on the *cost frontier* when no other run scores at least as high for the same or lower cost.
+
+## Building the download
+
+`build_package.R` assembles `OptimalEcospace-LiveSolver.zip` with only the files a run needs:
+
+* the app and launcher (`Start Live Solver.bat`, `R/LiveSolver/*.R`)
+* for each region in `Inputs/`, the model named by `<EWE_MODEL_FILE>` in its command-file template
+* the region's STConfig file, command-file template, and the rasters the solver reads or rewrites: every habitat layer in the STConfig, `basemap.asc`, `exclusions.asc` and `cost_map.asc`
+
+Sediment source data (`Inputs/dbSeaBed`), model backups, logs, `Backup_Base_Maps` and other working files are left out. Any new region or habitat layer added to an STConfig is picked up automatically.
+
+The *Live Solver package* GitHub Actions workflow builds the zip on every push that touches the app, `Inputs/` or `Model/`. It then unzips the package into an empty folder and runs a test-mode session there, to prove the package works on its own. On `main` it publishes the zip to the `live-solver` release, so the download link above always serves the current version. To build it locally, run `Rscript R/LiveSolver/build_package.R` from the repository root (the zip goes to `dist/`).
 
 ## Comparing scenarios
 

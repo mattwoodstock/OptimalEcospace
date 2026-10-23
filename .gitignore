@@ -5,3 +5,4 @@
 ../Inputs/dbSeaBed
 .data/dbSeaBedOutputs/
 .livesolver_lock
+dist/

@@ -1,0 +1,71 @@
+# Builds the Live Solver download (only the files needed to run it), checks that the
+# unpacked package runs on its own, and on `main` publishes it to the `live-solver`
+# release so the website link always serves the current version:
+#   https://github.com/mattwoodstock/OptimalEcospace/releases/download/live-solver/OptimalEcospace-LiveSolver.zip
+name: Live Solver package
+
+on:
+  push:
+    paths:
+      - "R/LiveSolver/**"
+      - "Inputs/**"
+      - "Model/**"
+      - "Start Live Solver.bat"
+      - ".github/workflows/live-solver-package.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System libraries for terra
+        run: sudo apt-get update -q && sudo apt-get install -y -q libgdal-dev libgeos-dev libproj-dev
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install R packages
+        run: Rscript -e 'install.packages(c("shiny", "bslib", "DT", "processx", "terra", "xml2", "jsonlite"))'
+
+      - name: Build package
+        run: Rscript R/LiveSolver/build_package.R dist
+
+      - name: Smoke test the unpacked package
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          unzip -q dist/OptimalEcospace-LiveSolver.zip -d "$RUNNER_TEMP/pkg"
+          cd "$RUNNER_TEMP/pkg/OptimalEcospace-LiveSolver/R/LiveSolver"
+          Rscript -e '
+            source("solver_engine.R")
+            root <- normalizePath("../..")
+            cfg <- ls_default_config(root)
+            cfg$search$iterations <- 5
+            cfg$search$dry_run <- TRUE
+            S <- ls_run_session(cfg, root)
+            stopifnot(nrow(S$results) == 7, all(S$results$finished))
+            invisible(shiny::shinyAppDir("."))
+            cat("Package runs on its own\n")'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OptimalEcospace-LiveSolver
+          path: dist/OptimalEcospace-LiveSolver.zip
+
+      - name: Publish to the live-solver release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Live Solver download built from ${GITHUB_SHA::7}. Unzip, then double-click 'Start Live Solver.bat' (or source R/LiveSolver/launch.R in RStudio)."
+          if gh release view live-solver >/dev/null 2>&1; then
+            gh release edit live-solver --notes "$notes"
+          else
+            gh release create live-solver --title "Live Solver (latest)" --notes "$notes" --target "$GITHUB_SHA"
+          fi
+          gh release upload live-solver dist/OptimalEcospace-LiveSolver.zip --clobber
