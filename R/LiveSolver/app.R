@@ -71,6 +71,8 @@ ui <- page_navbar(
           "Ecospace console", span(class = "small text-muted", paste("Version", ls_version()))),
         textInput("console_path", "Location of EwEClientConsole.exe", defaults$model$console_path, width = "100%"),
         uiOutput("console_status"),
+        textInput("cache_dir", "Ecospace spatial cache folder (optional)", defaults$model$cache_dir, width = "100%",
+                  placeholder = "Found automatically when possible; its contents are deleted before every run"),
         p(class = "small",
           "Real scenarios need the Ecospace console installed on this Windows computer. Without it you can",
           "still try everything in ", strong("test mode"), ", which uses made-up scores so you can learn the tool."),
@@ -449,6 +451,7 @@ server <- function(input, output, session) {
       model = list(
         region = m$region, model_file = m$model_file, inputs_dir = m$inputs_dir,
         stconfig = info$stconfig, cmd_template = info$cmd_template, console_path = input$console_path,
+        cache_dir = input$cache_dir %||% "",
         ecosim_scenario = nv("ecosim_scenario", defaults$model$ecosim_scenario), ecospace_scenario = nv("ecospace_scenario", defaults$model$ecospace_scenario),
         n_years = nv("n_years", defaults$model$n_years), use_spinup = input$use_spinup, spinup_years = nv("spinup_years", defaults$model$spinup_years),
         timesteps_year = nv("timesteps_year", defaults$model$timesteps_year), n_threads = nv("n_threads", defaults$model$n_threads), timeout_sec = nv("timeout_sec", defaults$model$timeout_sec),
@@ -532,6 +535,7 @@ server <- function(input, output, session) {
     updateSelectInput(session, "inst_displacement", selected = I$displacement)
     updateSelectInput(session, "dec_selection", selected = D$selection)
     updateTextInput(session, "console_path", value = M$console_path)
+    updateTextInput(session, "cache_dir", value = M$cache_dir %||% "")
     updateTextAreaInput(session, "extra_tags", value = M$extra_tags %||% "")
     objectives(cfg$objectives)
     updateSelectInput(session, "roi_objective", choices = cfg$objectives$name, selected = Se$roi_objective)
