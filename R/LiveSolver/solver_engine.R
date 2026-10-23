@@ -28,6 +28,12 @@ library(jsonlite)
 ls_default_console <- "C:/Program Files/EcoSpace Console 1.4.3.1 64-bit/EwEClientConsole.exe"
 ls_lock_name       <- ".livesolver_lock"
 
+# Build stamp written by build_package.R ("development" when running from the repository)
+ls_version <- function() {
+  f <- file.path(Sys.getenv("OPTIMAL_ECOSPACE_ROOT", "../.."), "R/LiveSolver/VERSION")
+  if (file.exists(f)) readLines(f, warn = FALSE)[1] else "development"
+}
+
 # Small helpers ----
 
 # NA / NULL / "" -> no limit
@@ -963,6 +969,7 @@ ls_new_session <- function(cfg, repo_root) {
   }
   S$alerts <- character()
   S$alert_keys <- character()
+  ls_log(S, sprintf("Live Solver version %s", ls_version()))
   ls_log(S, sprintf("Session %s | %s | strategy: %s | %d runs%s", basename(S$session_dir), basename(cfg$model$model_file),
                     cfg$strategy$type, S$total_runs, if (isTRUE(cfg$search$dry_run)) " | DRY RUN (synthetic objectives)" else ""))
   S

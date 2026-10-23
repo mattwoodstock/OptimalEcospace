@@ -59,6 +59,12 @@ for (f in files) {
   if (!file.copy(file.path(repo_root, f), file.path(stage, f))) stop("Could not copy ", f)
 }
 
+# Version stamp shown in the app and logs, so a downloaded copy can be identified
+sha <- Sys.getenv("GITHUB_SHA")
+if (!nzchar(sha)) sha <- tryCatch(system2("git", c("rev-parse", "HEAD"), stdout = TRUE), error = function(e) "unknown")
+writeLines(sprintf("%s (built %s)", substr(sha[1], 1, 7), format(Sys.time(), "%Y-%m-%d %H:%M UTC", tz = "UTC")),
+           file.path(stage, "R/LiveSolver/VERSION"))
+
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 zip_path <- normalizePath(file.path(out_dir, paste0(pkg_name, ".zip")), winslash = "/", mustWork = FALSE)
 unlink(zip_path)

@@ -6,3 +6,4 @@
 .data/dbSeaBedOutputs/
 .livesolver_lock
 dist/
+R/LiveSolver/VERSION

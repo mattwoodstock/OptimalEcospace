@@ -67,7 +67,8 @@ ui <- page_navbar(
           "Every scenario is saved in the Outputs folder, so nothing is lost when you close the app.")
       ),
       card(
-        card_header("Ecospace console"),
+        card_header(class = "d-flex justify-content-between align-items-center",
+          "Ecospace console", span(class = "small text-muted", paste("Version", ls_version()))),
         textInput("console_path", "Location of EwEClientConsole.exe", defaults$model$console_path, width = "100%"),
         uiOutput("console_status"),
         p(class = "small",
