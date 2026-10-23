@@ -1133,11 +1133,14 @@ ls_plot_layout <- function(P, cand = NULL, main = "", show_eligible = TRUE) {
   e <- as.vector(ext(P$template))
   xs <- seq(e[1], e[2], length.out = P$nc + 1)
   ys <- seq(e[3], e[4], length.out = P$nr + 1)
-  op <- par(mar = c(3, 3, 2, 1), mgp = c(1.8, 0.5, 0))
+  op <- par(mar = c(3.4, 3, 2, 1), mgp = c(1.8, 0.5, 0))
   on.exit(par(op))
+  # Shrink the plot region to the map's true shape (instead of asp, which pads with blank space)
+  ratio <- diff(e[3:4]) / (diff(e[1:2]) * cos(mean(e[3:4]) * pi / 180))
+  pin <- par("pin")
+  par(pin = if (pin[1] * ratio <= pin[2]) c(pin[1], pin[1] * ratio) else c(pin[2] / ratio, pin[2]))
   image(xs, ys, t(m[P$nr:1, , drop = FALSE]), col = ls_layout_colors, breaks = seq(-0.5, 6.5, 1),
-        xlab = "Longitude", ylab = "Latitude", main = main, useRaster = TRUE,
-        asp = 1 / cos(mean(e[3:4]) * pi / 180))
+        xlab = "Longitude", ylab = "Latitude", main = main, useRaster = TRUE, xaxs = "i", yaxs = "i")
   present <- sort(unique(z))
   legend("bottomright", legend = ls_layout_labels[present + 1], fill = ls_layout_colors[present + 1],
          cex = 0.75, bg = "white", box.col = "grey70")

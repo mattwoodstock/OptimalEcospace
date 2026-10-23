@@ -253,13 +253,15 @@ ui <- page_navbar(
           "Constraint preview",
           div(actionButton("sample_btn", "Sample a candidate", class = "btn-sm btn-outline-primary"),
               actionButton("start_btn", "Start solver", class = "btn-sm btn-success"))),
-        div(class = "d-flex gap-4 align-items-end flex-wrap px-3 pt-2",
-          num("iterations", "Number of scenarios to run", defaults$search$iterations, min = 1, step = 1, width = "220px"),
-          checkboxInput("dry_run", "Test mode (no Ecospace; made-up scores)", defaults$search$dry_run)),
-        uiOutput("preview_error"),
-        plotOutput("preview_plot", height = "430px"),
-        tableOutput("preview_summary"),
-        uiOutput("sample_summary")
+        card_body(fillable = FALSE,
+          div(class = "d-flex gap-4 align-items-end flex-wrap",
+            num("iterations", "Number of scenarios to run", defaults$search$iterations, min = 1, step = 1, width = "220px"),
+            checkboxInput("dry_run", "Test mode (no Ecospace; made-up scores)", defaults$search$dry_run)),
+          uiOutput("preview_error"),
+          plotOutput("preview_plot", height = "430px"),
+          tableOutput("preview_summary"),
+          uiOutput("sample_summary")
+        )
       )
     )
   ),
@@ -709,7 +711,7 @@ server <- function(input, output, session) {
   })
   output$vb_mode <- renderText({
     req(rv$S)
-    if (isTRUE(rv$S$cfg$search$dry_run)) "Dry run: synthetic objectives" else paste("Ecospace:", basename(rv$S$cfg$model$model_file))
+    if (isTRUE(rv$S$cfg$search$dry_run)) "Test mode: made-up scores" else paste("Ecospace:", basename(rv$S$cfg$model$model_file))
   })
   output$vb_progress <- renderText({
     rv$tick
@@ -837,7 +839,7 @@ server <- function(input, output, session) {
     req(nrow(top))
     k <- nrow(obj)
     nc <- min(3, k)
-    op <- par(mfrow = c(ceiling(k / nc), nc), mar = c(3.2, 6.5, 2.5, 1), mgp = c(1.9, 0.5, 0), las = 1)
+    op <- par(mfrow = c(ceiling(k / nc), nc), mar = c(3.2, 6.5, 3.2, 1), mgp = c(1.9, 0.5, 0), las = 1)
     on.exit(par(op))
     par(cex = 1, cex.main = 0.95, cex.axis = 0.85, cex.lab = 0.85)
     for (j in seq_len(k)) {
@@ -847,7 +849,7 @@ server <- function(input, output, session) {
       col <- ifelse(v == 0, "#b5b5b5", ifelse(better, "#2a78d6", "#eb6834"))
       lim <- max(abs(v), 1e-9) * c(-1.15, 1.15)
       barplot(rev(v), names.arg = rev(top$run), horiz = TRUE, col = rev(col), border = NA, xlim = lim,
-              main = sprintf("%s (%s)", obj$name[j], if (obj$direction[j] == "max") "higher is better" else "lower is better"),
+              main = paste0(obj$name[j], "\n", if (obj$direction[j] == "max") "higher is better" else "lower is better"),
               xlab = "% change vs status quo", cex.names = 0.8, space = 0.25)
       abline(v = 0, col = "#6b6b6b")
     }
