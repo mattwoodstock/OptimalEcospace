@@ -206,7 +206,9 @@ ls_default_config <- function(repo_root) {
       existing_file     = "",    # "" = use the pristine structure layer as existing structures
       natural_habitats  = if (!is.null(lyr)) setdiff(lyr$name, struct_layer) else character(),
       basemap_file      = "basemap.asc",
-      pristine_source   = "inputs" # "inputs" (current Inputs files) or "backup" (Backup_Base_Maps)
+      pristine_source   = "inputs", # "inputs" (current Inputs files) or "backup" (Backup_Base_Maps)
+      existing_cover    = "same_as_new" # same_as_new: each existing structure cell gets the cover of one new
+                                        # structure; as_mapped: keep the map's values (e.g. presence = 1)
     ),
     strategy = list(
       type          = "install",  # install | decommission | mixed
@@ -214,11 +216,11 @@ ls_default_config <- function(repo_root) {
     ),
     install = list(
       budget                = 500000,
-      fill_budget           = TRUE,   # TRUE: keep adding until budget/max reached; FALSE: random count in [min_n, max_n]
-      min_n                 = 0,
-      max_n                 = NA,
+      fill_budget           = FALSE,  # FALSE: random count between min_n and max_n; TRUE: keep adding until budget/max
+      min_n                 = 1,
+      max_n                 = 500,
       coverage_mode         = "fraction", # fraction | area: how much of a cell one new structure covers
-      coverage_fraction     = 1.0,        # coverage_mode = "fraction": share of the cell (0-1)
+      coverage_fraction     = 0.05,       # coverage_mode = "fraction": share of the cell (0-1)
       footprint_km2         = 0.01,       # coverage_mode = "area": footprint, divided by each cell's area
       cost_source           = "map",  # map | depth | fixed
       cost_map_file         = "cost_map.asc",
@@ -242,9 +244,9 @@ ls_default_config <- function(repo_root) {
       displacement          = "proportional" # proportional | subtract | none
     ),
     decom = list(
-      budget            = NA,
-      min_n             = 0,
-      max_n             = NA,
+      budget            = 5000000,
+      min_n             = 1,
+      max_n             = 50,
       min_retained      = 0,
       eligible_threshold = 0,          # existing structure value must exceed this
       removal_fraction  = 1.0,         # 1 = full removal, < 1 = partial (e.g. toppling)
@@ -264,7 +266,6 @@ ls_default_config <- function(repo_root) {
       algorithm         = "random",   # random | evolutionary
       warmup            = 20,
       mutation_rate     = 0.15,
-      include_baselines = TRUE,       # add the no-change (status quo) run
       seed              = NA,
       dry_run           = !file.exists(console),
       eval_last_n       = 1,           # average objectives over the last N output rows
@@ -352,7 +353,7 @@ ls_recover_inputs <- function(inputs_dir) {
   info <- tryCatch(fromJSON(lock), error = function(e) NULL)
   if (!is.null(info) && dir.exists(info$snapshot_dir)) {
     for (i in seq_along(info$files)) {
-      src <- file.path(info$snapshot_dir, basename(info$files[i]))
+      src <- if (!is.null(info$sources)) info$sources[i] else file.path(info$snapshot_dir, basename(info$files[i]))
       if (file.exists(src)) file.copy(src, info$files[i], overwrite = TRUE)
     }
     message("Recovered pristine Inputs maps from interrupted session: ", info$snapshot_dir)
@@ -443,6 +444,12 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
   inst_cost <- ls_cost_vector(I, depth, inputs_dir, template)
   if (isTRUE(I$scale_cost_by_coverage)) inst_cost <- inst_cost * inst_cover
 
+  # Structure maps are often presence/absence (1 = structure); give existing structures a real cover
+  if (!identical(L$existing_cover, "as_mapped")) {
+    has <- struct0 > 0
+    struct0[has] <- inst_cover[has]
+  }
+
   # Decommissioning feasibility ----
   D <- cfg$decom
   dec_ok <- existing > ls_num(D$eligible_threshold, 0) & struct0 > 0 &
@@ -523,6 +530,9 @@ ls_greedy <- function(P, order, cost, budget, target, spacing) {
   list(cells = chosen, cost = spent)
 }
 
+# Largest number of cells the budget can pay for (cheapest first)
+ls_affordable <- function(cost, budget) sum(cumsum(sort(cost)) <= budget)
+
 ls_gen_install <- function(P, budget, keep = integer(0), target = NULL) {
   I <- P$cfg$install
   pool <- P$install_valid
@@ -530,7 +540,9 @@ ls_gen_install <- function(P, budget, keep = integer(0), target = NULL) {
   max_n <- min(length(pool), ls_limit(I$max_n))
   min_n <- ls_num(I$min_n, 0)
   if (is.null(target)) {
-    target <- if (isTRUE(I$fill_budget)) max_n else ls_sample_between(min_n, max_n)
+    # Random count between min and max, capped by how many the budget could buy at the cheapest cells,
+    # so every count in the range is reachable; which cells (and so the cost) varies with placement
+    target <- if (isTRUE(I$fill_budget)) max_n else ls_sample_between(min_n, min(max_n, ls_affordable(P$install_cost[pool], budget)))
   }
   if (is.na(target)) return(list(cells = integer(0), cost = 0, infeasible = TRUE))
   keep  <- intersect(keep, pool)
@@ -558,7 +570,7 @@ ls_gen_decom <- function(P, budget, keep = integer(0), target = NULL) {
   if (!length(pool)) return(list(cells = integer(0), cost = 0))
   n_exist <- sum(P$existing > 0)
   max_n <- min(length(pool), ls_limit(D$max_n), n_exist - ls_num(D$min_retained, 0))
-  if (is.null(target)) target <- ls_sample_between(ls_num(D$min_n, 0), max_n)
+  if (is.null(target)) target <- ls_sample_between(ls_num(D$min_n, 0), min(max_n, ls_affordable(P$decom_cost[pool], budget)))
   if (is.na(target)) return(list(cells = integer(0), cost = 0, infeasible = TRUE))
   keep  <- intersect(keep, pool)
   order <- c(ls_shuffle(keep), setdiff(ls_decom_order(P, pool), keep))
@@ -871,7 +883,7 @@ ls_strip_scores <- function(df) {
 }
 
 ls_score <- function(df, objectives) {
-  ok <- df$finished %in% TRUE
+  ok <- df$finished %in% TRUE & df$kind != "probe"   # a probe run read the wrong maps; never scored
   df$Composite_Score <- NA_real_
   df$Pareto <- FALSE
   if (!any(ok)) return(df)
@@ -924,7 +936,7 @@ ls_new_session <- function(cfg, repo_root) {
   S$P <- ls_build_problem(cfg, S$session_dir)
   ls_save_config(cfg, file.path(S$session_dir, "solver_config.json"))
 
-  S$total_runs <- round(ls_num(cfg$search$iterations, 0)) + if (isTRUE(cfg$search$include_baselines)) 1 else 0
+  S$total_runs <- round(ls_num(cfg$search$iterations, 100)) + 1   # + the status quo run
   S$i       <- 0
   S$results <- NULL
   S$cands   <- list()
@@ -937,20 +949,28 @@ ls_new_session <- function(cfg, repo_root) {
   # The region's own STConfig is repaired in place to point at this folder's Inputs maps (its stored
   # paths may come from another computer). Everything touched is snapshotted, guarded by a lock for
   # crash recovery, and restored when the session ends.
+  S$targets <- setNames(S$P$layers$file, S$P$layers$name)   # map files Ecospace reads, per layer
   if (!isTRUE(cfg$search$dry_run)) {
-    S$restore_files <- c(S$P$layers$file, normalizePath(cfg$model$stconfig, winslash = "/"))
-    file.copy(cfg$model$stconfig, file.path(S$P$snapshot_dir, basename(cfg$model$stconfig)), overwrite = TRUE)
-    write_json(list(snapshot_dir = S$P$snapshot_dir, files = S$restore_files),
-               file.path(cfg$model$inputs_dir, ls_lock_name), auto_unbox = TRUE)
-    S$stconfig <- ls_write_stconfig(cfg$model$stconfig, setNames(S$P$layers$file, S$P$layers$name),
-                                    cfg$model$stconfig)
+    stc <- normalizePath(cfg$model$stconfig, winslash = "/")
+    file.copy(stc, file.path(S$P$snapshot_dir, basename(stc)), overwrite = TRUE)
+    S$restore <- data.frame(dest = c(S$P$layers$file, stc),
+                            src  = file.path(S$P$snapshot_dir, basename(c(S$P$layers$file, stc))),
+                            stringsAsFactors = FALSE)
+    ls_write_lock(S)
+    S$stconfig <- ls_write_stconfig(stc, S$targets, stc)
     S$spatiallog <- file.path(dirname(cfg$model$model_file),
                               paste0(sub("\\.eweaccdb$", "", basename(cfg$model$model_file)), "_spatiallog.txt"))
   }
   S$alerts <- character()
+  S$alert_keys <- character()
   ls_log(S, sprintf("Session %s | %s | strategy: %s | %d runs%s", basename(S$session_dir), basename(cfg$model$model_file),
                     cfg$strategy$type, S$total_runs, if (isTRUE(cfg$search$dry_run)) " | DRY RUN (synthetic objectives)" else ""))
   S
+}
+
+ls_write_lock <- function(S) {
+  write_json(list(snapshot_dir = S$P$snapshot_dir, files = S$restore$dest, sources = S$restore$src),
+             file.path(S$cfg$model$inputs_dir, ls_lock_name), auto_unbox = TRUE)
 }
 
 ls_log <- function(S, msg) {
@@ -970,9 +990,11 @@ ls_next_job <- function(S) {
   S$i <- S$i + 1
   idx <- S$i
   cfg <- S$cfg
-  base <- isTRUE(cfg$search$include_baselines)
-  kind <- if (base && idx == 1) "baseline_none" else {
-    n_done <- idx - if (base) 1 else 0
+  # Run 1 is the status quo; it is repeated if Ecospace turned out to read maps elsewhere (see ls_check_run)
+  redo <- isTRUE(S$redo_status_quo)
+  S$redo_status_quo <- FALSE
+  kind <- if (idx == 1 || redo) "baseline_none" else {
+    n_done <- sum(S$results$kind %in% c("random", "evolutionary"))
     if (cfg$search$algorithm == "evolutionary" && n_done > ls_num(cfg$search$warmup, 0) && !is.null(ls_elite(S))) "evolutionary" else "random"
   }
   cand <- NULL
@@ -1010,7 +1032,7 @@ ls_start_job <- function(S, job) {
   }
 
   for (nm in names(job$map_files)) {
-    target <- P$layers$file[P$layers$name == nm]
+    target <- S$targets[[nm]]
     file.copy(job$map_files[[nm]], target, overwrite = TRUE)
     if (!identical(unname(tools::md5sum(job$map_files[[nm]])), unname(tools::md5sum(target)))) {
       stop("Could not overwrite ", target, ". Is it open in another program?")
@@ -1076,7 +1098,6 @@ ls_finish_job <- function(S, job) {
   )
   row <- cbind(row, as.data.frame(obj, check.names = FALSE))
   write.csv(row, file.path(job$run_dir, "run_summary.csv"), row.names = FALSE)
-  if (finished && !dry) ls_check_run(S, job, obj)
 
   S$results <- ls_score(rbind(ls_strip_scores(S$results), row), cfg$objectives)
   write.csv(S$results, S$results_file, row.names = FALSE)
@@ -1086,33 +1107,78 @@ ls_finish_job <- function(S, job) {
                     job$run, job$kind, row$n_installed, row$n_decommissioned, ls_usd(total_cost),
                     if (finished) "finished" else sprintf("FAILED (exit %s)", job$status),
                     if (is.na(sc)) "NA" else sprintf("%.3f", sc)))
+  if (finished && !dry) {
+    ls_check_run(S, job, obj)
+    S$results <- ls_score(ls_strip_scores(S$results), cfg$objectives)   # a run may have been relabelled
+    write.csv(S$results, S$results_file, row.names = FALSE)
+  }
   invisible(row)
 }
 
 # Diagnostics after a real run: did Ecospace read this run's structure map, and did anything change?
-ls_alert <- function(S, msg) {
+# Logged every time; shown in the app once per kind of problem
+ls_alert <- function(S, msg, key = msg) {
   ls_log(S, paste("WARNING:", msg))
-  S$alerts <- c(S$alerts, msg)
+  if (!key %in% S$alert_keys) {
+    S$alert_keys <- c(S$alert_keys, key)
+    S$alerts <- c(S$alerts, msg)
+  }
 }
 
 ls_check_run <- function(S, job, obj) {
   norm_path <- function(x) tolower(gsub("\\\\", "/", x))
   log <- S$spatiallog
+  loaded <- character()
   if (!is.null(log) && file.exists(log) && file.mtime(log) >= job$started - 5) {
     file.copy(log, file.path(job$run_dir, "spatiallog.txt"), overwrite = TRUE)
-    loaded <- sub(".*Loaded data from '(.*)'.*", "\\1", grep("Loaded data from '", readLines(log, warn = FALSE), value = TRUE))
-    if (length(loaded) && !norm_path(S$P$struct_file) %in% norm_path(loaded)) {
-      ls_alert(S, sprintf("%s: Ecospace did not load %s. Its spatial log lists: %s", job$run, S$P$struct_file,
-                          paste(unique(basename(loaded)), collapse = ", ")))
+    loaded <- unique(sub(".*Loaded data from '(.*)'.*", "\\1", grep("Loaded data from '", readLines(log, warn = FALSE), value = TRUE)))
+  } else {
+    ls_alert(S, sprintf("%s: Ecospace wrote no spatial log (%s), so the solver cannot confirm which maps it read.", job$run, log),
+             key = "no_spatiallog")
+  }
+
+  # Ecospace may read the maps listed in the STConfig saved with the model, not the one passed to it.
+  # After the first run, retarget to the files it actually loaded (snapshot them, restore at the end)
+  # and repeat the status quo run with the solver's maps.
+  if (length(loaded) && !isTRUE(S$targets_checked)) {
+    S$targets_checked <- TRUE
+    moved <- character()
+    for (nm in names(S$targets)) {
+      hit <- loaded[tolower(basename(gsub("\\\\", "/", loaded))) == tolower(basename(S$targets[[nm]]))]
+      if (!length(hit) || norm_path(hit[1]) == norm_path(S$targets[[nm]])) next
+      ext <- if (.Platform$OS.type == "windows") hit[1] else gsub("\\\\", "/", hit[1])
+      if (!file.exists(ext)) {
+        ls_alert(S, sprintf("Ecospace reads the %s map from %s, which this computer cannot open. Re-save the model's spatial configuration to point at this folder's Inputs maps.", nm, ext))
+        next
+      }
+      snap <- file.path(S$P$snapshot_dir, "external", nm, basename(ext))
+      dir.create(dirname(snap), recursive = TRUE, showWarnings = FALSE)
+      file.copy(ext, snap, overwrite = TRUE)
+      S$restore <- rbind(S$restore, data.frame(dest = ext, src = snap, stringsAsFactors = FALSE))
+      S$targets[[nm]] <- ext
+      moved <- c(moved, ext)
+    }
+    if (length(moved)) {
+      ls_write_lock(S)
+      ls_alert(S, sprintf("Ecospace reads its maps from %s (the spatial configuration saved with the model), not from this folder. The solver now updates those files before each run and restores them afterwards. The status quo run is repeated with the solver's maps.",
+                          paste(unique(dirname(moved)), collapse = ", ")))
+      S$results$kind[S$results$run == job$run] <- "probe"
+      S$redo_status_quo <- TRUE
+      S$total_runs <- S$total_runs + 1
+      return(invisible())
     }
   }
-  sq <- S$results[S$results$kind == "baseline_none" & S$results$finished %in% TRUE, , drop = FALSE]
+  if (length(loaded) && !norm_path(S$targets[[S$cfg$layers$structure_layer]]) %in% norm_path(loaded)) {
+    ls_alert(S, sprintf("%s: Ecospace did not load %s. Its spatial log lists: %s", job$run,
+                        S$targets[[S$cfg$layers$structure_layer]], paste(unique(loaded), collapse = ", ")), key = "wrong_map")
+  }
+  sq <- S$results[S$results$kind == "baseline_none" & S$results$finished %in% TRUE & S$results$run != job$run, , drop = FALSE]
   changed <- length(job$cand$install) + length(job$cand$decom) > 0
   if (job$kind != "baseline_none" && changed && nrow(sq)) {
     same <- vapply(names(obj), function(n) isTRUE(all.equal(as.numeric(obj[[n]]), as.numeric(sq[[n]][1]), tolerance = 0)), logical(1))
     if (all(same)) {
       ls_alert(S, sprintf("%s changed %d cells but every outcome is identical to the status quo; Ecospace may not be reading the new maps.",
-                          job$run, length(job$cand$install) + length(job$cand$decom)))
+                          job$run, length(job$cand$install) + length(job$cand$decom)), key = "identical")
     }
   }
 }
@@ -1123,7 +1189,7 @@ ls_close_session <- function(S, job = NULL) {
   if (!is.null(job$proc) && job$proc$is_alive()) job$proc$kill_tree()
   cfg <- S$cfg
   if (!isTRUE(cfg$search$dry_run)) {
-    for (f in S$restore_files) file.copy(file.path(S$P$snapshot_dir, basename(f)), f, overwrite = TRUE)
+    for (k in seq_len(nrow(S$restore))) file.copy(S$restore$src[k], S$restore$dest[k], overwrite = TRUE)
     unlink(file.path(cfg$model$inputs_dir, ls_lock_name))
     ls_log(S, "Restored the original maps and STConfig in the Inputs folder.")
   }

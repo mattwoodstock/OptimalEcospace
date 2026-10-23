@@ -27,7 +27,7 @@ defaults  <- ls_default_config(repo_root)
 # UI helpers ----
 
 num <- function(id, label, value, ...) numericInput(id, label, if (is.null(value) || is.na(value)) NA else value, ...)
-lim_note <- function() helpText("Leave a limit blank for no limit.")
+lim_note <- function() helpText("Every field has a default; a field left blank uses it.")
 
 layout_choices <- c(
   "Random"                       = "random",
@@ -106,6 +106,9 @@ ui <- page_navbar(
           selectInput("natural_habitats", "Natural habitat layers displaced / restored", choices = NULL, multiple = TRUE),
           selectInput("basemap_file", "Basemap (depth)", choices = NULL),
           selectInput("existing_file", "Existing structures map", choices = NULL),
+          radioButtons("existing_cover", "Cover of each existing structure cell", c(
+            "Same as one new structure (default)" = "same_as_new",
+            "As stored in the map (e.g. presence = 1)" = "as_mapped")),
           radioButtons("pristine_source", "Pristine habitat maps", inline = TRUE,
                        c("Current Inputs files" = "inputs", "Backup_Base_Maps folder" = "backup")),
           textAreaInput("extra_tags", "Extra command-file lines (advanced)", defaults$model$extra_tags, rows = 3,
@@ -125,7 +128,7 @@ ui <- page_navbar(
           conditionalPanel("input.strategy_type == 'decommission'", helpText("Not used by the selected strategy.")),
           h6("Budget & quantity"),
           num("inst_budget", "Budget (USD)", defaults$install$budget, min = 0, step = 50000),
-          checkboxInput("inst_fill_budget", "Fill the budget (otherwise a random count between min and max)", defaults$install$fill_budget),
+          checkboxInput("inst_fill_budget", "Always fill the budget (default: each scenario adds a random number of structures between the min and max, as far as the budget allows)", defaults$install$fill_budget),
           layout_columns(
             num("inst_min_n", "Min new structures", defaults$install$min_n, min = 0, step = 1),
             num("inst_max_n", "Max new structures", defaults$install$max_n, min = 0, step = 1)
@@ -235,7 +238,7 @@ ui <- page_navbar(
           layout_columns(
             num("seed", "Random seed (blank = random)", NA, step = 1)
           ),
-          checkboxInput("include_baselines", "Add a no-change (status quo) run to compare against", TRUE),
+          helpText("Run 1 is always the status quo (no change), which every scenario is compared against."),
           radioButtons("algorithm", "Search algorithm", c(
             "Random search" = "random",
             "Evolutionary (mutate the best run)" = "evolutionary")),
@@ -414,54 +417,79 @@ server <- function(input, output, session) {
   })
 
   # Inputs -> configuration ----
+  # Every numeric field falls back to a default when left blank
+  nv <- function(id, default) {
+    v <- input[[id]]
+    if (is.null(v) || !length(v) || is.na(v)) default else v
+  }
+  # Region-specific defaults: the depth range of water cells and the map extent
+  region_defaults <- reactive({
+    bf <- input$basemap_file
+    if (is.null(bf) || !nzchar(bf)) bf <- "basemap.asc"
+    f <- file.path(model_row()$inputs_dir, bf)
+    req(file.exists(f))
+    b <- terra::rast(f)
+    d <- terra::values(b, mat = FALSE); d <- d[!is.na(d) & d > 0]
+    e <- unname(as.vector(terra::ext(b)))
+    list(depth_min = 0, depth_max = ceiling(max(d)), xmin = round(e[1], 3), xmax = round(e[2], 3),
+         ymin = round(e[3], 3), ymax = round(e[4], 3))
+  })
+  # Show those defaults in the inputs whenever the model or basemap changes
+  observeEvent(region_defaults(), {
+    rd <- region_defaults()
+    for (pre in c("inst_", "dec_")) {
+      for (k in names(rd)) updateNumericInput(session, paste0(pre, k), value = rd[[k]])
+    }
+  })
+
   config <- reactive({
-    m <- model_row(); info <- region()
+    m <- model_row(); info <- region(); rd <- region_defaults()
     list(
       model = list(
         region = m$region, model_file = m$model_file, inputs_dir = m$inputs_dir,
         stconfig = info$stconfig, cmd_template = info$cmd_template, console_path = input$console_path,
-        ecosim_scenario = input$ecosim_scenario, ecospace_scenario = input$ecospace_scenario,
-        n_years = input$n_years, use_spinup = input$use_spinup, spinup_years = input$spinup_years,
-        timesteps_year = input$timesteps_year, n_threads = input$n_threads, timeout_sec = input$timeout_sec,
+        ecosim_scenario = nv("ecosim_scenario", defaults$model$ecosim_scenario), ecospace_scenario = nv("ecospace_scenario", defaults$model$ecospace_scenario),
+        n_years = nv("n_years", defaults$model$n_years), use_spinup = input$use_spinup, spinup_years = nv("spinup_years", defaults$model$spinup_years),
+        timesteps_year = nv("timesteps_year", defaults$model$timesteps_year), n_threads = nv("n_threads", defaults$model$n_threads), timeout_sec = nv("timeout_sec", defaults$model$timeout_sec),
         extra_tags = input$extra_tags
       ),
       layers = list(
         structure_layer = input$structure_layer, existing_file = input$existing_file,
         natural_habitats = input$natural_habitats %||% character(), basemap_file = input$basemap_file,
-        pristine_source = input$pristine_source
+        pristine_source = input$pristine_source, existing_cover = input$existing_cover %||% "same_as_new"
       ),
       strategy = list(type = input$strategy_type, shared_budget = input$shared_budget),
       install = list(
-        budget = input$inst_budget, fill_budget = input$inst_fill_budget,
-        min_n = input$inst_min_n, max_n = input$inst_max_n, coverage_mode = input$inst_cov_mode,
-        coverage_fraction = input$inst_coverage, footprint_km2 = input$inst_footprint,
-        cost_source = input$inst_cost_source, cost_map_file = input$inst_cost_map, cost_multiplier = input$inst_cost_mult,
-        fixed_cost = input$inst_fixed_cost, depth_cost_rate = input$inst_depth_rate,
+        budget = nv("inst_budget", defaults$install$budget), fill_budget = input$inst_fill_budget,
+        min_n = nv("inst_min_n", defaults$install$min_n), max_n = nv("inst_max_n", defaults$install$max_n), coverage_mode = input$inst_cov_mode,
+        coverage_fraction = nv("inst_coverage", defaults$install$coverage_fraction), footprint_km2 = nv("inst_footprint", defaults$install$footprint_km2),
+        cost_source = input$inst_cost_source, cost_map_file = input$inst_cost_map, cost_multiplier = nv("inst_cost_mult", defaults$install$cost_multiplier),
+        fixed_cost = nv("inst_fixed_cost", defaults$install$fixed_cost), depth_cost_rate = nv("inst_depth_rate", defaults$install$depth_cost_rate),
         scale_cost_by_coverage = input$inst_scale_cov,
-        depth_min = input$inst_depth_min, depth_max = input$inst_depth_max,
+        depth_min = nv("inst_depth_min", rd$depth_min), depth_max = nv("inst_depth_max", rd$depth_max),
         use_exclusions = input$inst_use_excl, exclusions_file = input$inst_excl_file,
         extra_mask_file = input$inst_mask_file,
-        xmin = input$inst_xmin, xmax = input$inst_xmax, ymin = input$inst_ymin, ymax = input$inst_ymax,
-        min_spacing = input$inst_spacing, buffer_existing = input$inst_buffer,
-        avoid_habitats = input$inst_avoid %||% character(), avoid_threshold = input$inst_avoid_thr,
-        placement = input$inst_placement, n_clusters = input$inst_n_clusters, cluster_radius = input$inst_cluster_radius,
+        xmin = nv("inst_xmin", rd$xmin), xmax = nv("inst_xmax", rd$xmax), ymin = nv("inst_ymin", rd$ymin), ymax = nv("inst_ymax", rd$ymax),
+        min_spacing = nv("inst_spacing", 0), buffer_existing = nv("inst_buffer", 0),
+        avoid_habitats = input$inst_avoid %||% character(), avoid_threshold = nv("inst_avoid_thr", defaults$install$avoid_threshold),
+        placement = input$inst_placement, n_clusters = nv("inst_n_clusters", defaults$install$n_clusters), cluster_radius = nv("inst_cluster_radius", defaults$install$cluster_radius),
         displacement = input$inst_displacement
       ),
       decom = list(
-        budget = input$dec_budget, min_n = input$dec_min_n, max_n = input$dec_max_n,
-        min_retained = input$dec_min_retained, eligible_threshold = input$dec_threshold,
-        removal_fraction = input$dec_removal_fraction,
-        cost_source = input$dec_cost_source, cost_map_file = input$dec_cost_map, cost_multiplier = input$dec_cost_mult,
-        fixed_cost = input$dec_fixed_cost, depth_cost_rate = input$dec_depth_rate,
-        depth_min = input$dec_depth_min, depth_max = input$dec_depth_max,
-        xmin = input$dec_xmin, xmax = input$dec_xmax, ymin = input$dec_ymin, ymax = input$dec_ymax,
+        budget = nv("dec_budget", defaults$decom$budget), min_n = nv("dec_min_n", defaults$decom$min_n), max_n = nv("dec_max_n", defaults$decom$max_n),
+        min_retained = nv("dec_min_retained", defaults$decom$min_retained), eligible_threshold = nv("dec_threshold", defaults$decom$eligible_threshold),
+        removal_fraction = nv("dec_removal_fraction", defaults$decom$removal_fraction),
+        cost_source = input$dec_cost_source, cost_map_file = input$dec_cost_map, cost_multiplier = nv("dec_cost_mult", defaults$decom$cost_multiplier),
+        fixed_cost = nv("dec_fixed_cost", defaults$decom$fixed_cost), depth_cost_rate = nv("dec_depth_rate", defaults$decom$depth_cost_rate),
+        depth_min = nv("dec_depth_min", rd$depth_min), depth_max = nv("dec_depth_max", rd$depth_max),
+        xmin = nv("dec_xmin", rd$xmin), xmax = nv("dec_xmax", rd$xmax), ymin = nv("dec_ymin", rd$ymin), ymax = nv("dec_ymax", rd$ymax),
         selection = input$dec_selection, restore = input$dec_restore
       ),
       search = list(
-        iterations = input$iterations, algorithm = input$algorithm, warmup = input$warmup,
-        mutation_rate = input$mutation_rate, include_baselines = input$include_baselines,
+        iterations = nv("iterations", defaults$search$iterations), algorithm = input$algorithm, warmup = nv("warmup", defaults$search$warmup),
+        mutation_rate = nv("mutation_rate", defaults$search$mutation_rate),
         seed = input$seed, dry_run = input$dry_run,
-        eval_last_n = input$eval_last_n, roi_objective = input$roi_objective, max_retries = 50
+        eval_last_n = nv("eval_last_n", 1), roi_objective = input$roi_objective, max_retries = 50
       ),
       objectives = objectives()
     )
@@ -493,9 +521,9 @@ server <- function(input, output, session) {
     for (id in names(sliders)) updateSliderInput(session, id, value = ls_num(sliders[[id]]))
     checks <- c(use_spinup = M$use_spinup, shared_budget = cfg$strategy$shared_budget, inst_fill_budget = I$fill_budget,
                 inst_scale_cov = I$scale_cost_by_coverage, inst_use_excl = I$use_exclusions,
-                include_baselines = Se$include_baselines, dry_run = Se$dry_run)
+                dry_run = Se$dry_run)
     for (id in names(checks)) updateCheckboxInput(session, id, value = isTRUE(checks[[id]]))
-    radios <- c(pristine_source = cfg$layers$pristine_source, strategy_type = cfg$strategy$type,
+    radios <- c(pristine_source = cfg$layers$pristine_source, existing_cover = cfg$layers$existing_cover %||% "same_as_new", strategy_type = cfg$strategy$type,
                 inst_cost_source = I$cost_source, dec_cost_source = D$cost_source,
                 algorithm = Se$algorithm)
     for (id in names(radios)) updateRadioButtons(session, id, selected = radios[[id]])
@@ -752,7 +780,7 @@ server <- function(input, output, session) {
     df <- results_view()
     req(df, any(is.finite(df$Composite_Score)))
     par(mar = c(4, 4, 1, 1))
-    cols <- c(baseline_none = "#6b6b6b", random = "#2a78d6", evolutionary = "#eb6834")
+    cols <- c(probe = "#b5b5b5", baseline_none = "#6b6b6b", random = "#2a78d6", evolutionary = "#eb6834")
     plot(df$iteration, df$Composite_Score, pch = 19, col = cols[df$kind], xlab = "Run", ylab = "Composite score")
     sc <- df$Composite_Score; sc[is.na(sc)] <- -Inf
     lines(df$iteration, cummax(sc), type = "s", col = "#d62728", lwd = 2)
@@ -850,8 +878,8 @@ server <- function(input, output, session) {
     obj <- rv$S$cfg$objectives
     pct_cols <- paste0(obj$name, "_vs_status_quo_pct")
     shiny::validate(shiny::need(any(df$kind == "baseline_none" & df$finished %in% TRUE),
-                  "The comparison needs the status quo run (Search → add a no-change run)."))
-    top <- df[df$kind != "baseline_none" & is.finite(df$Composite_Score), ]
+                  "Waiting for the status quo run to finish."))
+    top <- df[df$kind %in% c("random", "evolutionary") & is.finite(df$Composite_Score), ]
     top <- head(top[order(-top$Composite_Score), ], input$top_n)
     req(nrow(top))
     k <- nrow(obj)
