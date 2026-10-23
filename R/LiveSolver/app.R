@@ -42,14 +42,50 @@ ui <- page_navbar(
   id = "nav",
   fillable = FALSE,
 
+  # Start tab ----
+  nav_panel("Start here",
+    layout_columns(col_widths = c(7, 5),
+      card(
+        card_header("What this tool does"),
+        p("The Live Solver tests where artificial structures (such as artificial reefs) could be installed,",
+          "or which existing structures could be removed, and how each choice changes the ecosystem",
+          "simulated by Ecospace."),
+        p("You set the rules (budget, how many structures, where they are allowed, what it costs).",
+          "The solver then builds many scenarios that follow those rules, runs Ecospace for each one,",
+          "and ranks them by the outcomes you care about (for example red snapper biomass and catch)."),
+        h5("How to play"),
+        tags$ol(
+          tags$li(strong("Setup tab → Strategy:"), " install new structures, remove existing ones, or both."),
+          tags$li(strong("Adjust the constraints."), " The map on the right updates to show where structures can go.",
+                  " Press ", em("Sample a candidate"), " to see one example scenario."),
+          tags$li(strong("Choose how many scenarios to run"), " and press ", em("Start solver"), "."),
+          tags$li(strong("Live solver tab:"), " watch scores and maps update after every scenario."),
+          tags$li(strong("Results tab:"), " compare scenarios with the status quo, click any scenario to see its map,",
+                  " and download everything as a spreadsheet.")
+        ),
+        p(class = "text-muted small",
+          "Every scenario is saved in the Outputs folder, so nothing is lost when you close the app.")
+      ),
+      card(
+        card_header("Ecospace console"),
+        textInput("console_path", "Location of EwEClientConsole.exe", defaults$model$console_path, width = "100%"),
+        uiOutput("console_status"),
+        p(class = "small",
+          "Real scenarios need the Ecospace console installed on this Windows computer. Without it you can",
+          "still try everything in ", strong("test mode"), ", which uses made-up scores so you can learn the tool."),
+        div(class = "d-flex gap-2 flex-wrap",
+          actionButton("goto_setup", "Set up scenarios", class = "btn-primary"),
+          actionButton("quick_test", "Quick test (20 scenarios, test mode)", class = "btn-outline-secondary"))
+      )
+    )
+  ),
+
   # Setup tab ----
   nav_panel("Setup",
     layout_columns(col_widths = c(5, 7),
       accordion(id = "setup_acc", open = c("Model & run"),
         accordion_panel("Model & run",
           selectInput("model", "Ecospace model", choices = models$key, selected = models$key[1]),
-          textInput("console_path", "Ecospace console (EwEClientConsole.exe)", defaults$model$console_path),
-          uiOutput("console_status"),
           layout_columns(
             num("ecosim_scenario", "Ecosim scenario index", defaults$model$ecosim_scenario, min = 1, step = 1),
             num("ecospace_scenario", "Ecospace scenario index", defaults$model$ecospace_scenario, min = 1, step = 1)
@@ -191,7 +227,6 @@ ui <- page_navbar(
 
         accordion_panel("Search",
           layout_columns(
-            num("iterations", "Iterations", defaults$search$iterations, min = 1, step = 1),
             num("seed", "Random seed (blank = random)", NA, step = 1)
           ),
           checkboxInput("include_baselines", "Add the two baseline runs (no change / everything eligible)", TRUE),
@@ -205,7 +240,6 @@ ui <- page_navbar(
           radioButtons("map_mode", "How Ecospace receives the maps", c(
             "Overwrite Inputs maps each run (restored afterwards)" = "overwrite",
             "Per-run STConfig pointing at the run's maps" = "isolated")),
-          checkboxInput("dry_run", "Dry run: skip Ecospace and use synthetic objectives (workflow test only)", defaults$search$dry_run)
         ),
 
         accordion_panel("Save / load configuration",
@@ -219,10 +253,15 @@ ui <- page_navbar(
           "Constraint preview",
           div(actionButton("sample_btn", "Sample a candidate", class = "btn-sm btn-outline-primary"),
               actionButton("start_btn", "Start solver", class = "btn-sm btn-success"))),
-        uiOutput("preview_error"),
-        plotOutput("preview_plot", height = "430px"),
-        tableOutput("preview_summary"),
-        uiOutput("sample_summary")
+        card_body(fillable = FALSE,
+          div(class = "d-flex gap-4 align-items-end flex-wrap",
+            num("iterations", "Number of scenarios to run", defaults$search$iterations, min = 1, step = 1, width = "220px"),
+            checkboxInput("dry_run", "Test mode (no Ecospace; made-up scores)", defaults$search$dry_run)),
+          uiOutput("preview_error"),
+          plotOutput("preview_plot", height = "430px"),
+          tableOutput("preview_summary"),
+          uiOutput("sample_summary")
+        )
       )
     )
   ),
@@ -257,13 +296,30 @@ ui <- page_navbar(
     div(class = "mb-2",
       downloadButton("res_download", "Download results (.csv)", class = "btn-sm"),
       textOutput("session_path", inline = TRUE)),
-    DTOutput("results_table")
+    layout_columns(col_widths = c(7, 5),
+      card(
+        card_header(class = "d-flex justify-content-between align-items-center",
+          "Top scenarios: change from the status quo",
+          sliderInput("top_n", NULL, 3, 15, 8, step = 1, width = "200px")),
+        plotOutput("compare_plot", height = "520px"),
+        p(class = "small text-muted px-3",
+          "Bars show the percent change of each outcome compared with the no-change baseline.",
+          "Blue = better (in the direction you chose for that outcome), orange = worse.")
+      ),
+      card(
+        card_header(textOutput("detail_title")),
+        plotOutput("detail_map", height = "320px"),
+        tableOutput("detail_table")
+      )
+    ),
+    card(card_header("All scenarios (click a row to inspect it)"), DTOutput("results_table"))
   )
 )
 
 server <- function(input, output, session) {
 
-  rv <- reactiveValues(S = NULL, job = NULL, state = "idle", tick = 0, sample = NULL, pending = NULL)
+  rv <- reactiveValues(S = NULL, job = NULL, state = "idle", tick = 0, sample = NULL, pending = NULL,
+                       selected_run = NULL, autostart = FALSE)
   objectives <- reactiveVal(defaults$objectives)
 
   model_row <- reactive({
@@ -274,10 +330,10 @@ server <- function(input, output, session) {
 
   output$console_status <- renderUI({
     if (file.exists(input$console_path)) {
-      helpText(icon("check"), "Console found.")
+      div(class = "alert alert-success py-2", icon("check"), "Console found. Real Ecospace scenarios are available.")
     } else {
-      helpText(style = "color:#b35c00", icon("triangle-exclamation"),
-               "Console not found on this machine: only dry runs are possible.")
+      div(class = "alert alert-warning py-2", icon("triangle-exclamation"),
+          "Console not found at this location. Only test mode is available until you enter the correct path.")
     }
   })
 
@@ -519,13 +575,13 @@ server <- function(input, output, session) {
   })
 
   # Live loop: one step per tick so the UI stays responsive ----
-  observeEvent(input$start_btn, {
-    if (rv$state %in% c("running", "paused")) {
+  start_session <- function() {
+    if (rv$state %in% c("running", "paused", "pausing")) {
       showNotification("A session is already active. Stop it first.", type = "warning"); return()
     }
     cfg <- config()
     if (!isTRUE(cfg$search$dry_run) && !file.exists(cfg$model$console_path)) {
-      showNotification("Ecospace console not found. Fix the path or enable dry run.", type = "error"); return()
+      showNotification("Ecospace console not found. Set its location on the Start here tab, or switch on test mode.", type = "error"); return()
     }
     if (!nrow(cfg$objectives)) { showNotification("Define at least one objective.", type = "error"); return() }
     S <- tryCatch(ls_new_session(cfg, repo_root), error = function(e) {
@@ -533,7 +589,22 @@ server <- function(input, output, session) {
     })
     req(S)
     rv$S <- S; rv$job <- NULL; rv$state <- "running"; rv$tick <- rv$tick + 1
+    rv$selected_run <- NULL
     nav_select("nav", "Live solver")
+  }
+  observeEvent(input$start_btn, start_session())
+
+  observeEvent(input$goto_setup, nav_select("nav", "Setup"))
+  # Quick test: switch on test mode with 20 scenarios, then start once the inputs have updated
+  observeEvent(input$quick_test, {
+    updateCheckboxInput(session, "dry_run", value = TRUE)
+    updateNumericInput(session, "iterations", value = 20)
+    rv$autostart <- TRUE
+  })
+  observe({
+    req(isTRUE(rv$autostart), isTRUE(input$dry_run), identical(as.numeric(input$iterations), 20))
+    rv$autostart <- FALSE
+    isolate(start_session())
   })
 
   observe({
@@ -609,7 +680,7 @@ server <- function(input, output, session) {
     cur$direction[!is.na(hit)] <- new$direction[hit[!is.na(hit)]]
     S$cfg$objectives <- cur
     S$P$cfg$objectives <- cur
-    S$results <- ls_score(S$results[, setdiff(names(S$results), c("Composite_Score", "Pareto"))], cur)
+    S$results <- ls_score(ls_strip_scores(S$results), cur)
     write.csv(S$results, S$results_file, row.names = FALSE)
     ls_log(S, "Re-scored with updated objective weights/directions.")
     rv$tick <- rv$tick + 1
@@ -640,7 +711,7 @@ server <- function(input, output, session) {
   })
   output$vb_mode <- renderText({
     req(rv$S)
-    if (isTRUE(rv$S$cfg$search$dry_run)) "Dry run: synthetic objectives" else paste("Ecospace:", basename(rv$S$cfg$model$model_file))
+    if (isTRUE(rv$S$cfg$search$dry_run)) "Test mode: made-up scores" else paste("Ecospace:", basename(rv$S$cfg$model$model_file))
   })
   output$vb_progress <- renderText({
     rv$tick
@@ -664,7 +735,7 @@ server <- function(input, output, session) {
     df <- results_view()
     req(df, any(is.finite(df$Composite_Score)))
     par(mar = c(4, 4, 1, 1))
-    cols <- c(baseline_none = "#7f7f7f", baseline_all = "#000000", random = "#1f77b4", evolutionary = "#2ca02c")
+    cols <- c(baseline_none = "#6b6b6b", baseline_all = "#1baf7a", random = "#2a78d6", evolutionary = "#eb6834")
     plot(df$iteration, df$Composite_Score, pch = 19, col = cols[df$kind], xlab = "Run", ylab = "Composite score")
     sc <- df$Composite_Score; sc[is.na(sc)] <- -Inf
     lines(df$iteration, cummax(sc), type = "s", col = "#d62728", lwd = 2)
@@ -711,12 +782,79 @@ server <- function(input, output, session) {
     req(df)
     df <- df[, setdiff(names(df), c("map_dir", "timestamp")), drop = FALSE]
     num_cols <- names(df)[vapply(df, is.double, logical(1))]
-    dt <- datatable(df, rownames = FALSE, filter = "top",
+    sel <- if (!is.null(rv$selected_run) && rv$selected_run %in% df$run) which(df$run == rv$selected_run) else NULL
+    dt <- datatable(df, rownames = FALSE, filter = "top", selection = list(mode = "single", selected = sel),
                     options = list(pageLength = 25, scrollX = TRUE, order = list(list(which(names(df) == "Composite_Score") - 1, "desc"))))
-    round_cols <- intersect(num_cols, c("Composite_Score", "ROI_per_dollar", objectives()$name))
+    round_cols <- intersect(num_cols, c("Composite_Score", "ROI_per_dollar", objectives()$name,
+                                        grep("_vs_status_quo_pct$", names(df), value = TRUE)))
     if (length(round_cols)) dt <- formatRound(dt, round_cols, 4)
     dt
   })
+  observeEvent(input$results_table_rows_selected, {
+    df <- isolate(results_view())
+    i <- input$results_table_rows_selected
+    if (length(i) && !is.null(df)) rv$selected_run <- df$run[i]
+  })
+
+  # Selected scenario (defaults to the best one)
+  detail_row <- reactive({
+    df <- results_view()
+    req(df)
+    if (!is.null(rv$selected_run) && rv$selected_run %in% df$run) return(df[df$run == rv$selected_run, ])
+    b <- best_row()
+    if (is.null(b)) df[nrow(df), ] else b
+  })
+  output$detail_title <- renderText({
+    r <- detail_row()
+    sprintf("Scenario %s: +%d new, -%d removed, %s", r$run, r$n_installed, r$n_decommissioned, ls_usd(r$total_cost))
+  })
+  output$detail_map <- renderPlot({
+    r <- detail_row()
+    ls_plot_layout(rv$S$P, rv$S$cands[[r$run]], show_eligible = FALSE)
+  })
+  output$detail_table <- renderTable({
+    r <- detail_row()
+    obj <- rv$S$cfg$objectives
+    data.frame(
+      Outcome = obj$name,
+      Goal = ifelse(obj$direction == "max", "higher is better", "lower is better"),
+      Value = vapply(obj$name, function(n) if (is.null(r[[n]])) NA_real_ else as.numeric(r[[n]]), numeric(1)),
+      `Change vs status quo (%)` = vapply(obj$name, function(n) {
+        v <- r[[paste0(n, "_vs_status_quo_pct")]]; if (is.null(v)) NA_real_ else as.numeric(v)
+      }, numeric(1)),
+      check.names = FALSE
+    )
+  }, digits = 3, na = "-", striped = TRUE, spacing = "xs")
+
+  # Small multiples: one panel per objective, top-N scenarios as horizontal bars
+  output$compare_plot <- renderPlot({
+    df <- results_view()
+    req(df, any(is.finite(df$Composite_Score)))
+    obj <- rv$S$cfg$objectives
+    pct_cols <- paste0(obj$name, "_vs_status_quo_pct")
+    shiny::validate(shiny::need(any(df$kind == "baseline_none" & df$finished %in% TRUE),
+                  "The comparison needs the no-change baseline run (Search → add the two baseline runs)."))
+    top <- df[df$kind != "baseline_none" & is.finite(df$Composite_Score), ]
+    top <- head(top[order(-top$Composite_Score), ], input$top_n)
+    req(nrow(top))
+    k <- nrow(obj)
+    nc <- min(3, k)
+    op <- par(mfrow = c(ceiling(k / nc), nc), mar = c(3.2, 6.5, 3.2, 1), mgp = c(1.9, 0.5, 0), las = 1)
+    on.exit(par(op))
+    par(cex = 1, cex.main = 0.95, cex.axis = 0.85, cex.lab = 0.85)
+    for (j in seq_len(k)) {
+      v <- as.numeric(top[[pct_cols[j]]])
+      v[!is.finite(v)] <- 0
+      better <- if (obj$direction[j] == "max") v > 0 else v < 0
+      col <- ifelse(v == 0, "#b5b5b5", ifelse(better, "#2a78d6", "#eb6834"))
+      lim <- max(abs(v), 1e-9) * c(-1.15, 1.15)
+      barplot(rev(v), names.arg = rev(top$run), horiz = TRUE, col = rev(col), border = NA, xlim = lim,
+              main = paste0(obj$name[j], "\n", if (obj$direction[j] == "max") "higher is better" else "lower is better"),
+              xlab = "% change vs status quo", cex.names = 0.8, space = 0.25)
+      abline(v = 0, col = "#6b6b6b")
+    }
+  })
+
   output$res_download <- downloadHandler(
     filename = function() "optimization_results.csv",
     content = function(file) write.csv(results(), file, row.names = FALSE)

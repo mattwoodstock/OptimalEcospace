@@ -144,10 +144,15 @@ ls_region_info <- function(inputs_dir) {
   )
 }
 
-ls_find_console <- function() {
-  hits <- Sys.glob(c("C:/Program Files/EcoSpace Console*/EwEClientConsole.exe",
-                     "C:/Program Files (x86)/EcoSpace Console*/EwEClientConsole.exe"))
-  if (length(hits)) hits[length(hits)] else ls_default_console
+# Looks in a `console/` folder next to the app first (portable package), then Program Files
+ls_find_console <- function(repo_root = NULL) {
+  local <- if (!is.null(repo_root) && dir.exists(file.path(repo_root, "console"))) {
+    list.files(file.path(repo_root, "console"), pattern = "^EwEClientConsole\\.exe$",
+               recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  } else character()
+  hits <- c(local, Sys.glob(c("C:/Program Files/EcoSpace Console*/EwEClientConsole.exe",
+                              "C:/Program Files (x86)/EcoSpace Console*/EwEClientConsole.exe")))
+  if (length(hits)) normalizePath(hits[1], winslash = "/") else ls_default_console
 }
 
 # Default Configuration ----
@@ -174,7 +179,7 @@ ls_default_config <- function(repo_root) {
     hit <- grep("struct|reef", lyr$name, ignore.case = TRUE, value = TRUE)
     if (length(hit)) hit[1] else lyr$name[1]
   } else NA_character_
-  console <- ls_find_console()
+  console <- ls_find_console(repo_root)
 
   list(
     model = list(
@@ -848,6 +853,13 @@ ls_synthetic_objectives <- function(P, layers, objectives) {
 
 # Scoring ----
 
+# Derived columns that ls_score() recomputes from scratch
+ls_strip_scores <- function(df) {
+  if (is.null(df)) return(NULL)
+  drop <- names(df) %in% c("Composite_Score", "Pareto") | grepl("_vs_status_quo_pct$", names(df))
+  df[, !drop, drop = FALSE]
+}
+
 ls_score <- function(df, objectives) {
   ok <- df$finished %in% TRUE
   df$Composite_Score <- NA_real_
@@ -872,6 +884,14 @@ ls_score <- function(df, objectives) {
     b <- setdiff(cand, a)
     df$Pareto[a] <- !any(df$Composite_Score[b] >= df$Composite_Score[a] & df$total_cost[b] <= df$total_cost[a] &
                          (df$Composite_Score[b] > df$Composite_Score[a] | df$total_cost[b] < df$total_cost[a]))
+  }
+
+  # Percent change of each objective relative to the no-change baseline (status quo)
+  base <- which(df$kind == "baseline_none" & ok)
+  for (nm in objectives$name) {
+    v <- if (is.null(df[[nm]])) rep(NA_real_, nrow(df)) else suppressWarnings(as.numeric(df[[nm]]))
+    b <- if (length(base)) v[base[1]] else NA_real_
+    df[[paste0(nm, "_vs_status_quo_pct")]] <- if (is.finite(b) && b != 0) 100 * (v - b) / abs(b) else NA_real_
   }
   df
 }
@@ -1035,9 +1055,7 @@ ls_finish_job <- function(S, job) {
   row <- cbind(row, as.data.frame(obj, check.names = FALSE))
   write.csv(row, file.path(job$run_dir, "run_summary.csv"), row.names = FALSE)
 
-  prev <- S$results
-  if (!is.null(prev)) prev <- prev[, setdiff(names(prev), c("Composite_Score", "Pareto")), drop = FALSE]
-  S$results <- ls_score(rbind(prev, row), cfg$objectives)
+  S$results <- ls_score(rbind(ls_strip_scores(S$results), row), cfg$objectives)
   write.csv(S$results, S$results_file, row.names = FALSE)
 
   sc <- S$results$Composite_Score[nrow(S$results)]
@@ -1115,11 +1133,14 @@ ls_plot_layout <- function(P, cand = NULL, main = "", show_eligible = TRUE) {
   e <- as.vector(ext(P$template))
   xs <- seq(e[1], e[2], length.out = P$nc + 1)
   ys <- seq(e[3], e[4], length.out = P$nr + 1)
-  op <- par(mar = c(3, 3, 2, 1), mgp = c(1.8, 0.5, 0))
+  op <- par(mar = c(3.4, 3, 2, 1), mgp = c(1.8, 0.5, 0))
   on.exit(par(op))
+  # Shrink the plot region to the map's true shape (instead of asp, which pads with blank space)
+  ratio <- diff(e[3:4]) / (diff(e[1:2]) * cos(mean(e[3:4]) * pi / 180))
+  pin <- par("pin")
+  par(pin = if (pin[1] * ratio <= pin[2]) c(pin[1], pin[1] * ratio) else c(pin[2] / ratio, pin[2]))
   image(xs, ys, t(m[P$nr:1, , drop = FALSE]), col = ls_layout_colors, breaks = seq(-0.5, 6.5, 1),
-        xlab = "Longitude", ylab = "Latitude", main = main, useRaster = TRUE,
-        asp = 1 / cos(mean(e[3:4]) * pi / 180))
+        xlab = "Longitude", ylab = "Latitude", main = main, useRaster = TRUE, xaxs = "i", yaxs = "i")
   present <- sort(unique(z))
   legend("bottomright", legend = ls_layout_labels[present + 1], fill = ls_layout_colors[present + 1],
          cex = 0.75, bg = "white", box.col = "grey70")
