@@ -44,6 +44,8 @@ ls_winpath <- function(p) {
 
 ls_timestamp <- function() format(Sys.time(), "%Y-%m-%d %H:%M:%S")
 
+ls_pct <- function(x) paste0(trimws(formatC(100 * x, format = "fg", digits = 3)), "%")
+
 ls_usd <- function(x) paste0("$", formatC(round(x), format = "f", digits = 0, big.mark = ","))
 
 # Uniform integer between a and b (inclusive); NA when infeasible
@@ -215,7 +217,9 @@ ls_default_config <- function(repo_root) {
       fill_budget           = TRUE,   # TRUE: keep adding until budget/max reached; FALSE: random count in [min_n, max_n]
       min_n                 = 0,
       max_n                 = NA,
-      coverage_fraction     = 1.0,
+      coverage_mode         = "fraction", # fraction | area: how much of a cell one new structure covers
+      coverage_fraction     = 1.0,        # coverage_mode = "fraction": share of the cell (0-1)
+      footprint_km2         = 0.01,       # coverage_mode = "area": footprint, divided by each cell's area
       cost_source           = "map",  # map | depth | fixed
       cost_map_file         = "cost_map.asc",
       cost_multiplier       = 1,
@@ -260,7 +264,7 @@ ls_default_config <- function(repo_root) {
       algorithm         = "random",   # random | evolutionary
       warmup            = 20,
       mutation_rate     = 0.15,
-      include_baselines = TRUE,
+      include_baselines = TRUE,       # add the no-change (status quo) run
       seed              = NA,
       map_mode          = "overwrite", # overwrite | isolated
       dry_run           = !file.exists(console),
@@ -430,8 +434,15 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
     hard <- Reduce(`+`, lapply(hab0[avoid], function(v) { v[is.na(v)] <- 0; v }))
     inst_ok <- inst_ok & hard <= ls_num(I$avoid_threshold, 1)
   }
+  # Proportion of each cell one new structure covers (fixed fraction, or footprint / cell area)
+  cell_km2 <- values(cellSize(template, unit = "km"), mat = FALSE)
+  inst_cover <- if (identical(I$coverage_mode, "area")) {
+    pmin(1, ls_num(I$footprint_km2, 0) / cell_km2)
+  } else {
+    rep(min(1, max(0, ls_num(I$coverage_fraction, 1))), length(depth))
+  }
   inst_cost <- ls_cost_vector(I, depth, inputs_dir, template)
-  if (isTRUE(I$scale_cost_by_coverage)) inst_cost <- inst_cost * ls_num(I$coverage_fraction, 1)
+  if (isTRUE(I$scale_cost_by_coverage)) inst_cost <- inst_cost * inst_cover
 
   # Decommissioning feasibility ----
   D <- cfg$decom
@@ -447,7 +458,7 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
     struct0 = struct0, hab0 = hab0, existing = existing,
     install_valid  = if (type %in% c("install", "mixed")) which(inst_ok) else integer(0),
     decom_eligible = if (type %in% c("decommission", "mixed")) which(dec_ok) else integer(0),
-    install_cost = inst_cost, decom_cost = dec_cost
+    install_cost = inst_cost, decom_cost = dec_cost, install_cover = inst_cover, cell_km2 = cell_km2
   )
   P$summary <- ls_problem_summary(P)
   P
@@ -459,12 +470,18 @@ ls_problem_summary <- function(P) {
   dc <- P$decom_cost[P$decom_eligible]
   data.frame(
     item = c("Grid (rows x cols)", "Water cells", "Existing structure cells",
-             "Cells eligible for installation", "Installation cost range",
+             "Existing structure cover (min - max of cell)",
+             "Cells eligible for installation", "Cover added per new structure", "Installation cost range",
              "Max installs within budget (cheapest-first)",
              "Structures eligible for decommissioning", "Removal cost range"),
     value = c(
       sprintf("%d x %d", P$nr, P$nc), sum(P$water), sum(P$existing > 0),
+      if (any(P$struct0 > 0)) paste(ls_pct(min(P$struct0[P$struct0 > 0])), "-", ls_pct(max(P$struct0))) else "-",
       length(P$install_valid),
+      if (length(P$install_valid)) {
+        r <- range(P$install_cover[P$install_valid])
+        if (diff(r) < 1e-9) ls_pct(r[1]) else paste(ls_pct(r[1]), "-", ls_pct(r[2]))
+      } else "-",
       if (length(ic)) paste(ls_usd(min(ic)), "-", ls_usd(max(ic))) else "-",
       if (length(ic)) sum(cumsum(sort(ic)) <= ls_limit(cfg$install$budget)) else 0,
       length(P$decom_eligible),
@@ -507,22 +524,21 @@ ls_greedy <- function(P, order, cost, budget, target, spacing) {
   list(cells = chosen, cost = spent)
 }
 
-ls_gen_install <- function(P, budget, keep = integer(0), target = NULL, ignore_budget = FALSE) {
+ls_gen_install <- function(P, budget, keep = integer(0), target = NULL) {
   I <- P$cfg$install
   pool <- P$install_valid
   if (!length(pool)) return(list(cells = integer(0), cost = 0))
   max_n <- min(length(pool), ls_limit(I$max_n))
   min_n <- ls_num(I$min_n, 0)
   if (is.null(target)) {
-    target <- if (isTRUE(I$fill_budget) || ignore_budget) max_n else ls_sample_between(min_n, max_n)
+    target <- if (isTRUE(I$fill_budget)) max_n else ls_sample_between(min_n, max_n)
   }
   if (is.na(target)) return(list(cells = integer(0), cost = 0, infeasible = TRUE))
   keep  <- intersect(keep, pool)
   order <- c(ls_shuffle(keep), setdiff(ls_install_order(P, pool), keep))
   # Clustered placement may cover few cells; top up with the rest of the pool
   if (I$placement == "clustered" && isTRUE(I$fill_budget)) order <- c(order, ls_shuffle(setdiff(pool, order)))
-  ls_greedy(P, order, P$install_cost, if (ignore_budget) Inf else budget, target,
-            max(0, round(ls_num(I$min_spacing, 0))))
+  ls_greedy(P, order, P$install_cost, budget, target, max(0, round(ls_num(I$min_spacing, 0))))
 }
 
 ls_decom_order <- function(P, pool) {
@@ -537,18 +553,17 @@ ls_decom_order <- function(P, pool) {
   )
 }
 
-ls_gen_decom <- function(P, budget, keep = integer(0), target = NULL, ignore_budget = FALSE) {
+ls_gen_decom <- function(P, budget, keep = integer(0), target = NULL) {
   D <- P$cfg$decom
   pool <- P$decom_eligible
   if (!length(pool)) return(list(cells = integer(0), cost = 0))
   n_exist <- sum(P$existing > 0)
   max_n <- min(length(pool), ls_limit(D$max_n), n_exist - ls_num(D$min_retained, 0))
-  if (ignore_budget) target <- length(pool)
   if (is.null(target)) target <- ls_sample_between(ls_num(D$min_n, 0), max_n)
   if (is.na(target)) return(list(cells = integer(0), cost = 0, infeasible = TRUE))
   keep  <- intersect(keep, pool)
   order <- c(ls_shuffle(keep), setdiff(ls_decom_order(P, pool), keep))
-  ls_greedy(P, order, P$decom_cost, if (ignore_budget) Inf else budget, target, 0)
+  ls_greedy(P, order, P$decom_cost, budget, target, 0)
 }
 
 ls_candidate_key <- function(cand) {
@@ -567,7 +582,7 @@ ls_check_candidate <- function(P, cand) {
   cand
 }
 
-# kind: baseline_none | baseline_all | random | evolutionary
+# kind: baseline_none | random | evolutionary
 ls_generate_candidate <- function(P, kind = "random", elite = NULL) {
   cfg  <- P$cfg
   type <- cfg$strategy$type
@@ -579,9 +594,6 @@ ls_generate_candidate <- function(P, kind = "random", elite = NULL) {
   empty <- list(cells = integer(0), cost = 0)
   if (kind == "baseline_none") {
     d <- empty; i <- empty
-  } else if (kind == "baseline_all") {
-    d <- if (do_d) ls_gen_decom(P, Inf, ignore_budget = TRUE) else empty
-    i <- if (do_i) ls_gen_install(P, Inf, ignore_budget = TRUE) else empty
   } else {
     rate <- ls_num(cfg$search$mutation_rate, 0.15)
     mutate_keep <- function(x) x[runif(length(x)) > rate]
@@ -614,7 +626,7 @@ ls_generate_candidate <- function(P, kind = "random", elite = NULL) {
   }
   cand <- list(kind = kind, install = i$cells, decom = d$cells,
                install_cost = i$cost, decom_cost = d$cost)
-  if (kind %in% c("random", "evolutionary")) cand <- ls_check_candidate(P, cand) else { cand$feasible <- TRUE; cand$note <- "" }
+  if (kind == "baseline_none") { cand$feasible <- TRUE; cand$note <- "" } else cand <- ls_check_candidate(P, cand)
   cand
 }
 
@@ -649,8 +661,7 @@ ls_apply_candidate <- function(P, cand) {
   # Installation: add structure and displace natural habitat
   i <- cand$install
   if (length(i)) {
-    cov <- ls_num(I$coverage_fraction, 1)
-    added <- pmax(0, pmin(1, s[i] + cov) - s[i])
+    added <- pmax(0, pmin(1, s[i] + P$install_cover[i]) - s[i])
     s[i] <- s[i] + added
     if (length(habs)) {
       if (I$displacement == "proportional") {
@@ -910,7 +921,7 @@ ls_new_session <- function(cfg, repo_root) {
   S$P <- ls_build_problem(cfg, S$session_dir)
   ls_save_config(cfg, file.path(S$session_dir, "solver_config.json"))
 
-  S$total_runs <- round(ls_num(cfg$search$iterations, 0)) + if (isTRUE(cfg$search$include_baselines)) 2 else 0
+  S$total_runs <- round(ls_num(cfg$search$iterations, 0)) + if (isTRUE(cfg$search$include_baselines)) 1 else 0
   S$i       <- 0
   S$results <- NULL
   S$cands   <- list()
@@ -949,18 +960,17 @@ ls_next_job <- function(S) {
   idx <- S$i
   cfg <- S$cfg
   base <- isTRUE(cfg$search$include_baselines)
-  kind <- if (base && idx == 1) "baseline_none" else if (base && idx == 2) "baseline_all" else {
-    n_done <- idx - if (base) 2 else 0
+  kind <- if (base && idx == 1) "baseline_none" else {
+    n_done <- idx - if (base) 1 else 0
     if (cfg$search$algorithm == "evolutionary" && n_done > ls_num(cfg$search$warmup, 0) && !is.null(ls_elite(S))) "evolutionary" else "random"
   }
   cand <- NULL
   for (attempt in seq_len(max(1, ls_num(cfg$search$max_retries, 50)))) {
     cand <- ls_generate_candidate(S$P, kind, if (kind == "evolutionary") ls_elite(S) else NULL)
-    if (kind %in% c("baseline_none", "baseline_all")) break
+    if (kind == "baseline_none") break
     if (cand$feasible && !ls_candidate_key(cand) %in% S$seen) break
   }
-  suffix <- c(baseline_none = "_Baseline_None", baseline_all = "_Baseline_All")[kind]
-  run_name <- sprintf("Run_%04d%s", idx, if (is.na(suffix)) "" else suffix)
+  run_name <- sprintf("Run_%04d%s", idx, if (kind == "baseline_none") "_Status_Quo" else "")
   S$seen <- c(S$seen, ls_candidate_key(cand))
   S$cands[[run_name]] <- cand
   list(idx = idx, run = run_name, kind = kind, cand = cand,
@@ -1107,41 +1117,67 @@ ls_run_session <- function(cfg, repo_root, on_progress = NULL) {
 
 # Plotting ----
 
-# Layout map: 0 land, 1 water, 2 eligible install, 3 eligible decom, 4 existing kept,
-# 5 new installation, 6 decommissioned
-ls_layout_codes <- function(P, cand = NULL, show_eligible = TRUE) {
-  z <- ifelse(P$water, 1, 0)
-  z[P$existing > 0 & P$water] <- 4
-  if (show_eligible) {
-    z[P$install_valid]  <- 2
-    z[P$decom_eligible] <- 3
-  }
-  if (!is.null(cand)) {
-    z[cand$install] <- 5
-    z[cand$decom]   <- 6
-  }
-  z
-}
-
-ls_layout_colors <- c("#d9d9d9", "#dbe9f6", "#b8e0b0", "#f6c7c7", "#4d4d4d", "#f28e1c", "#d62728")
-ls_layout_labels <- c("Land", "Water", "Eligible: install", "Eligible: decommission",
-                      "Existing structure", "New structure", "Decommissioned")
+# Layout map: structure cells are shaded by the proportion of the cell that is structure
+# (the value Ecospace reads), on a land / water / eligible-for-installation background.
+# New and decommissioned cells are outlined so changes stay visible at any cover.
+ls_cover_breaks <- c(0, 0.2, 0.4, 0.6, 0.8, 1)
+ls_cover_colors <- c("#86b6ef", "#3987e5", "#256abf", "#184f95", "#0d366b")
+ls_bg_colors    <- c(land = "#d9d9d9", water = "#eef3f8", eligible = "#d4ecd0")
+ls_new_col      <- "#eb6834"
+ls_removed_col  <- "#d55181"
+ls_decom_ok_col <- "#8a8a8a"
 
 ls_plot_layout <- function(P, cand = NULL, main = "", show_eligible = TRUE) {
-  z <- ls_layout_codes(P, cand, show_eligible)
-  m <- matrix(z, nrow = P$nr, ncol = P$nc, byrow = TRUE)
-  e <- as.vector(ext(P$template))
+  e  <- as.vector(ext(P$template))
+  dx <- (e[2] - e[1]) / P$nc
+  dy <- (e[4] - e[3]) / P$nr
   xs <- seq(e[1], e[2], length.out = P$nc + 1)
   ys <- seq(e[3], e[4], length.out = P$nr + 1)
+  grid <- function(v) t(matrix(v, nrow = P$nr, ncol = P$nc, byrow = TRUE)[P$nr:1, , drop = FALSE])
+
+  bg <- ifelse(P$water, 2, 1)
+  if (show_eligible) bg[P$install_valid] <- 3
+  cover <- if (is.null(cand)) P$struct0 else ls_apply_candidate(P, cand)$structure
+  cover[is.na(cover) | cover <= 0 | !P$water] <- NA
+  cover <- pmin(cover, 1)
+
   op <- par(mar = c(3.4, 3, 2, 1), mgp = c(1.8, 0.5, 0))
   on.exit(par(op))
   # Shrink the plot region to the map's true shape (instead of asp, which pads with blank space)
   ratio <- diff(e[3:4]) / (diff(e[1:2]) * cos(mean(e[3:4]) * pi / 180))
   pin <- par("pin")
   par(pin = if (pin[1] * ratio <= pin[2]) c(pin[1], pin[1] * ratio) else c(pin[2] / ratio, pin[2]))
-  image(xs, ys, t(m[P$nr:1, , drop = FALSE]), col = ls_layout_colors, breaks = seq(-0.5, 6.5, 1),
+  image(xs, ys, grid(bg), col = ls_bg_colors, breaks = c(0.5, 1.5, 2.5, 3.5),
         xlab = "Longitude", ylab = "Latitude", main = main, useRaster = TRUE, xaxs = "i", yaxs = "i")
-  present <- sort(unique(z))
-  legend("bottomright", legend = ls_layout_labels[present + 1], fill = ls_layout_colors[present + 1],
-         cex = 0.75, bg = "white", box.col = "grey70")
+  if (any(!is.na(cover))) {
+    image(xs, ys, grid(cover), col = ls_cover_colors, breaks = ls_cover_breaks, add = TRUE, useRaster = TRUE)
+  }
+
+  outline <- function(idx, col, lwd = 1.6, lty = 1, cross = FALSE) {
+    if (!length(idx)) return(invisible())
+    r <- (idx - 1) %/% P$nc; c <- (idx - 1) %% P$nc
+    x0 <- e[1] + c * dx; y1 <- e[4] - r * dy
+    rect(x0, y1 - dy, x0 + dx, y1, border = col, lwd = lwd, lty = lty)
+    if (cross) segments(c(x0, x0), c(y1 - dy, y1), c(x0 + dx, x0 + dx), c(y1, y1 - dy), col = col, lwd = 1)
+  }
+  if (show_eligible) outline(setdiff(P$decom_eligible, cand$decom), ls_decom_ok_col, lwd = 1, lty = 2)
+  outline(cand$install, ls_new_col)
+  outline(cand$decom, ls_removed_col, cross = TRUE)
+
+  # Legend: background, then cover classes present, then change outlines
+  lab <- c("Land", "Water"); fill <- ls_bg_colors[1:2]; border <- rep("grey55", 2)
+  if (show_eligible && length(P$install_valid)) {
+    lab <- c(lab, "Eligible: install"); fill <- c(fill, ls_bg_colors[3]); border <- c(border, "grey55")
+  }
+  if (any(!is.na(cover))) {
+    used <- sort(unique(cut(cover[!is.na(cover)], ls_cover_breaks, labels = FALSE, include.lowest = TRUE)))
+    lab <- c(lab, sprintf("Structure cover %.0f-%.0f%%", 100 * ls_cover_breaks[used], 100 * ls_cover_breaks[used + 1]))
+    fill <- c(fill, ls_cover_colors[used]); border <- c(border, ls_cover_colors[used])
+  }
+  if (show_eligible && length(setdiff(P$decom_eligible, cand$decom))) {
+    lab <- c(lab, "Eligible: decommission"); fill <- c(fill, NA); border <- c(border, ls_decom_ok_col)
+  }
+  if (length(cand$install)) { lab <- c(lab, "New structure"); fill <- c(fill, NA); border <- c(border, ls_new_col) }
+  if (length(cand$decom))   { lab <- c(lab, "Decommissioned"); fill <- c(fill, NA); border <- c(border, ls_removed_col) }
+  legend("bottomright", legend = lab, fill = fill, border = border, cex = 0.72, bg = "white", box.col = "grey70")
 }

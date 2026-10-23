@@ -131,7 +131,13 @@ ui <- page_navbar(
             num("inst_max_n", "Max new structures", defaults$install$max_n, min = 0, step = 1)
           ),
           lim_note(),
-          sliderInput("inst_coverage", "Cell coverage of one structure (fraction)", 0.05, 1, defaults$install$coverage_fraction, 0.05),
+          radioButtons("inst_cov_mode", "How much of its cell one structure covers", inline = TRUE,
+                       c("Share of the cell" = "fraction", "Footprint area" = "area")),
+          conditionalPanel("input.inst_cov_mode == 'fraction'",
+            num("inst_coverage", "Share of the cell (0-1)", defaults$install$coverage_fraction, min = 0, max = 1, step = 0.001)),
+          conditionalPanel("input.inst_cov_mode == 'area'",
+            num("inst_footprint", "Footprint of one structure (km\u00b2)", defaults$install$footprint_km2, min = 0, step = 0.001),
+            helpText("Converted to a share of each cell using that cell's area.")),
           h6("Cost"),
           radioButtons("inst_cost_source", NULL, inline = TRUE,
                        c("Cost map" = "map", "Depth-based" = "depth", "Fixed only" = "fixed")),
@@ -141,7 +147,7 @@ ui <- page_navbar(
           conditionalPanel("input.inst_cost_source == 'depth'",
             num("inst_depth_rate", "USD per metre depth", defaults$install$depth_cost_rate, min = 0)),
           num("inst_fixed_cost", "Fixed cost per structure (USD, added)", defaults$install$fixed_cost, min = 0),
-          checkboxInput("inst_scale_cov", "Scale cost by coverage fraction", FALSE),
+          checkboxInput("inst_scale_cov", "Scale cost by the share of the cell covered", FALSE),
           h6("Where structures may go"),
           checkboxInput("inst_use_excl", "Respect exclusions map", TRUE),
           conditionalPanel("input.inst_use_excl", selectInput("inst_excl_file", "Exclusions map", choices = NULL)),
@@ -229,7 +235,7 @@ ui <- page_navbar(
           layout_columns(
             num("seed", "Random seed (blank = random)", NA, step = 1)
           ),
-          checkboxInput("include_baselines", "Add the two baseline runs (no change / everything eligible)", TRUE),
+          checkboxInput("include_baselines", "Add a no-change (status quo) run to compare against", TRUE),
           radioButtons("algorithm", "Search algorithm", c(
             "Random search" = "random",
             "Evolutionary (mutate the best run)" = "evolutionary")),
@@ -430,7 +436,8 @@ server <- function(input, output, session) {
       strategy = list(type = input$strategy_type, shared_budget = input$shared_budget),
       install = list(
         budget = input$inst_budget, fill_budget = input$inst_fill_budget,
-        min_n = input$inst_min_n, max_n = input$inst_max_n, coverage_fraction = input$inst_coverage,
+        min_n = input$inst_min_n, max_n = input$inst_max_n, coverage_mode = input$inst_cov_mode,
+        coverage_fraction = input$inst_coverage, footprint_km2 = input$inst_footprint,
         cost_source = input$inst_cost_source, cost_map_file = input$inst_cost_map, cost_multiplier = input$inst_cost_mult,
         fixed_cost = input$inst_fixed_cost, depth_cost_rate = input$inst_depth_rate,
         scale_cost_by_coverage = input$inst_scale_cov,
@@ -481,7 +488,10 @@ server <- function(input, output, session) {
               dec_xmin = D$xmin, dec_xmax = D$xmax, dec_ymin = D$ymin, dec_ymax = D$ymax,
               iterations = Se$iterations, seed = Se$seed, warmup = Se$warmup, eval_last_n = Se$eval_last_n)
     for (id in names(nums)) updateNumericInput(session, id, value = ls_num(nums[[id]]))
-    sliders <- c(inst_coverage = I$coverage_fraction, inst_avoid_thr = I$avoid_threshold,
+    updateNumericInput(session, "inst_coverage", value = ls_num(I$coverage_fraction, 1))
+    updateNumericInput(session, "inst_footprint", value = ls_num(I$footprint_km2, 0.01))
+    updateRadioButtons(session, "inst_cov_mode", selected = I$coverage_mode %||% "fraction")
+    sliders <- c(inst_avoid_thr = I$avoid_threshold,
                  dec_removal_fraction = D$removal_fraction, mutation_rate = Se$mutation_rate)
     for (id in names(sliders)) updateSliderInput(session, id, value = ls_num(sliders[[id]]))
     checks <- c(use_spinup = M$use_spinup, shared_budget = cfg$strategy$shared_budget, inst_fill_budget = I$fill_budget,
@@ -735,7 +745,7 @@ server <- function(input, output, session) {
     df <- results_view()
     req(df, any(is.finite(df$Composite_Score)))
     par(mar = c(4, 4, 1, 1))
-    cols <- c(baseline_none = "#6b6b6b", baseline_all = "#1baf7a", random = "#2a78d6", evolutionary = "#eb6834")
+    cols <- c(baseline_none = "#6b6b6b", random = "#2a78d6", evolutionary = "#eb6834")
     plot(df$iteration, df$Composite_Score, pch = 19, col = cols[df$kind], xlab = "Run", ylab = "Composite score")
     sc <- df$Composite_Score; sc[is.na(sc)] <- -Inf
     lines(df$iteration, cummax(sc), type = "s", col = "#d62728", lwd = 2)
@@ -833,7 +843,7 @@ server <- function(input, output, session) {
     obj <- rv$S$cfg$objectives
     pct_cols <- paste0(obj$name, "_vs_status_quo_pct")
     shiny::validate(shiny::need(any(df$kind == "baseline_none" & df$finished %in% TRUE),
-                  "The comparison needs the no-change baseline run (Search → add the two baseline runs)."))
+                  "The comparison needs the status quo run (Search → add a no-change run)."))
     top <- df[df$kind != "baseline_none" & is.finite(df$Composite_Score), ]
     top <- head(top[order(-top$Composite_Score), ], input$top_n)
     req(nrow(top))

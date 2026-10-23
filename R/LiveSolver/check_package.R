@@ -19,7 +19,7 @@ stopifnot(nrow(ls_discover_models(pkg_root)) >= 1)
 cfg$search$iterations <- 5
 cfg$search$dry_run <- TRUE
 S <- ls_run_session(cfg, pkg_root)
-stopifnot(nrow(S$results) == 7, all(S$results$finished))
+stopifnot(nrow(S$results) == 6, all(S$results$finished))
 
 invisible(shiny::shinyAppDir("."))
 cat("Package runs on its own:", nrow(S$results), "test-mode runs finished\n")
