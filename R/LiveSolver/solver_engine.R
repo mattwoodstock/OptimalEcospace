@@ -266,7 +266,6 @@ ls_default_config <- function(repo_root) {
       mutation_rate     = 0.15,
       include_baselines = TRUE,       # add the no-change (status quo) run
       seed              = NA,
-      map_mode          = "overwrite", # overwrite | isolated
       dry_run           = !file.exists(console),
       eval_last_n       = 1,           # average objectives over the last N output rows
       roi_objective     = "RS_Catch",
@@ -882,8 +881,12 @@ ls_score <- function(df, objectives) {
     v <- suppressWarnings(as.numeric(df[[obj$name]]))
     if (is.null(df[[obj$name]])) v <- rep(NA_real_, nrow(df))
     rng <- range(v[ok], na.rm = TRUE, finite = TRUE)
-    norm <- if (all(is.finite(rng)) && rng[2] > rng[1]) (v - rng[1]) / (rng[2] - rng[1]) else rep(0, nrow(df))
-    if (obj$direction == "min") norm <- 1 - norm
+    if (all(is.finite(rng)) && rng[2] > rng[1]) {
+      norm <- (v - rng[1]) / (rng[2] - rng[1])
+      if (obj$direction == "min") norm <- 1 - norm
+    } else {
+      norm <- rep(0, nrow(df))   # no differences between runs: contributes nothing
+    }
     norm[is.na(norm)] <- 0
     comp <- comp + norm * ls_num(obj$weight, 1)
   }
@@ -930,13 +933,21 @@ ls_new_session <- function(cfg, repo_root) {
   S$results_file <- file.path(S$session_dir, "optimization_results.csv")
   S$closed  <- FALSE
 
-  # Overwrite mode: Ecospace reads the Inputs maps, so guard them with a lock for crash recovery
-  if (cfg$search$map_mode == "overwrite" && !isTRUE(cfg$search$dry_run)) {
-    write_json(list(snapshot_dir = S$P$snapshot_dir, files = S$P$layers$file),
+  # Ecospace reads one fixed STConfig file and the maps it lists, so each run overwrites those maps.
+  # The region's own STConfig is repaired in place to point at this folder's Inputs maps (its stored
+  # paths may come from another computer). Everything touched is snapshotted, guarded by a lock for
+  # crash recovery, and restored when the session ends.
+  if (!isTRUE(cfg$search$dry_run)) {
+    S$restore_files <- c(S$P$layers$file, normalizePath(cfg$model$stconfig, winslash = "/"))
+    file.copy(cfg$model$stconfig, file.path(S$P$snapshot_dir, basename(cfg$model$stconfig)), overwrite = TRUE)
+    write_json(list(snapshot_dir = S$P$snapshot_dir, files = S$restore_files),
                file.path(cfg$model$inputs_dir, ls_lock_name), auto_unbox = TRUE)
     S$stconfig <- ls_write_stconfig(cfg$model$stconfig, setNames(S$P$layers$file, S$P$layers$name),
-                                    file.path(S$session_dir, "STConfig_session.xml"))
+                                    cfg$model$stconfig)
+    S$spatiallog <- file.path(dirname(cfg$model$model_file),
+                              paste0(sub("\\.eweaccdb$", "", basename(cfg$model$model_file)), "_spatiallog.txt"))
   }
+  S$alerts <- character()
   ls_log(S, sprintf("Session %s | %s | strategy: %s | %d runs%s", basename(S$session_dir), basename(cfg$model$model_file),
                     cfg$strategy$type, S$total_runs, if (isTRUE(cfg$search$dry_run)) " | DRY RUN (synthetic objectives)" else ""))
   S
@@ -998,13 +1009,14 @@ ls_start_job <- function(S, job) {
     return(job)
   }
 
-  if (cfg$search$map_mode == "overwrite") {
-    for (nm in names(job$map_files)) file.copy(job$map_files[[nm]], P$layers$file[P$layers$name == nm], overwrite = TRUE)
-    stconfig <- S$stconfig
-  } else {
-    stconfig <- ls_write_stconfig(cfg$model$stconfig, job$map_files, file.path(job$run_dir, "STConfig_run.xml"))
+  for (nm in names(job$map_files)) {
+    target <- P$layers$file[P$layers$name == nm]
+    file.copy(job$map_files[[nm]], target, overwrite = TRUE)
+    if (!identical(unname(tools::md5sum(job$map_files[[nm]])), unname(tools::md5sum(target)))) {
+      stop("Could not overwrite ", target, ". Is it open in another program?")
+    }
   }
-  cmd <- ls_write_cmd(P, job$run_dir, stconfig)
+  cmd <- ls_write_cmd(P, job$run_dir, S$stconfig)
 
   console <- cfg$model$console_path
   if (!file.exists(console)) stop("Ecospace console not found: ", console, " (enable dry run to test without it)")
@@ -1064,6 +1076,7 @@ ls_finish_job <- function(S, job) {
   )
   row <- cbind(row, as.data.frame(obj, check.names = FALSE))
   write.csv(row, file.path(job$run_dir, "run_summary.csv"), row.names = FALSE)
+  if (finished && !dry) ls_check_run(S, job, obj)
 
   S$results <- ls_score(rbind(ls_strip_scores(S$results), row), cfg$objectives)
   write.csv(S$results, S$results_file, row.names = FALSE)
@@ -1076,15 +1089,43 @@ ls_finish_job <- function(S, job) {
   invisible(row)
 }
 
+# Diagnostics after a real run: did Ecospace read this run's structure map, and did anything change?
+ls_alert <- function(S, msg) {
+  ls_log(S, paste("WARNING:", msg))
+  S$alerts <- c(S$alerts, msg)
+}
+
+ls_check_run <- function(S, job, obj) {
+  norm_path <- function(x) tolower(gsub("\\\\", "/", x))
+  log <- S$spatiallog
+  if (!is.null(log) && file.exists(log) && file.mtime(log) >= job$started - 5) {
+    file.copy(log, file.path(job$run_dir, "spatiallog.txt"), overwrite = TRUE)
+    loaded <- sub(".*Loaded data from '(.*)'.*", "\\1", grep("Loaded data from '", readLines(log, warn = FALSE), value = TRUE))
+    if (length(loaded) && !norm_path(S$P$struct_file) %in% norm_path(loaded)) {
+      ls_alert(S, sprintf("%s: Ecospace did not load %s. Its spatial log lists: %s", job$run, S$P$struct_file,
+                          paste(unique(basename(loaded)), collapse = ", ")))
+    }
+  }
+  sq <- S$results[S$results$kind == "baseline_none" & S$results$finished %in% TRUE, , drop = FALSE]
+  changed <- length(job$cand$install) + length(job$cand$decom) > 0
+  if (job$kind != "baseline_none" && changed && nrow(sq)) {
+    same <- vapply(names(obj), function(n) isTRUE(all.equal(as.numeric(obj[[n]]), as.numeric(sq[[n]][1]), tolerance = 0)), logical(1))
+    if (all(same)) {
+      ls_alert(S, sprintf("%s changed %d cells but every outcome is identical to the status quo; Ecospace may not be reading the new maps.",
+                          job$run, length(job$cand$install) + length(job$cand$decom)))
+    }
+  }
+}
+
 # Kill any running console, put pristine maps back and remove the lock
 ls_close_session <- function(S, job = NULL) {
   if (isTRUE(S$closed)) return(invisible(NULL))
   if (!is.null(job$proc) && job$proc$is_alive()) job$proc$kill_tree()
   cfg <- S$cfg
-  if (cfg$search$map_mode == "overwrite" && !isTRUE(cfg$search$dry_run)) {
-    for (f in S$P$layers$file) file.copy(file.path(S$P$snapshot_dir, basename(f)), f, overwrite = TRUE)
+  if (!isTRUE(cfg$search$dry_run)) {
+    for (f in S$restore_files) file.copy(file.path(S$P$snapshot_dir, basename(f)), f, overwrite = TRUE)
     unlink(file.path(cfg$model$inputs_dir, ls_lock_name))
-    ls_log(S, "Restored pristine maps to the Inputs folder.")
+    ls_log(S, "Restored the original maps and STConfig in the Inputs folder.")
   }
   if (!is.null(S$results) && any(is.finite(S$results$Composite_Score))) {
     best <- S$results[which.max(S$results$Composite_Score), ]

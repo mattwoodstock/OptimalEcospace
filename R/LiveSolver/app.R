@@ -242,10 +242,7 @@ ui <- page_navbar(
           conditionalPanel("input.algorithm == 'evolutionary'",
             layout_columns(
               num("warmup", "Random warm-up runs", defaults$search$warmup, min = 0, step = 1),
-              sliderInput("mutation_rate", "Mutation rate", 0.01, 0.9, defaults$search$mutation_rate, 0.01))),
-          radioButtons("map_mode", "How Ecospace receives the maps", c(
-            "Overwrite Inputs maps each run (restored afterwards)" = "overwrite",
-            "Per-run STConfig pointing at the run's maps" = "isolated")),
+              sliderInput("mutation_rate", "Mutation rate", 0.01, 0.9, defaults$search$mutation_rate, 0.01)))
         ),
 
         accordion_panel("Save / load configuration",
@@ -325,7 +322,7 @@ ui <- page_navbar(
 server <- function(input, output, session) {
 
   rv <- reactiveValues(S = NULL, job = NULL, state = "idle", tick = 0, sample = NULL, pending = NULL,
-                       selected_run = NULL, autostart = FALSE)
+                       selected_run = NULL, autostart = FALSE, alerts_shown = 0)
   objectives <- reactiveVal(defaults$objectives)
 
   model_row <- reactive({
@@ -463,7 +460,7 @@ server <- function(input, output, session) {
       search = list(
         iterations = input$iterations, algorithm = input$algorithm, warmup = input$warmup,
         mutation_rate = input$mutation_rate, include_baselines = input$include_baselines,
-        seed = input$seed, map_mode = input$map_mode, dry_run = input$dry_run,
+        seed = input$seed, dry_run = input$dry_run,
         eval_last_n = input$eval_last_n, roi_objective = input$roi_objective, max_retries = 50
       ),
       objectives = objectives()
@@ -500,7 +497,7 @@ server <- function(input, output, session) {
     for (id in names(checks)) updateCheckboxInput(session, id, value = isTRUE(checks[[id]]))
     radios <- c(pristine_source = cfg$layers$pristine_source, strategy_type = cfg$strategy$type,
                 inst_cost_source = I$cost_source, dec_cost_source = D$cost_source,
-                algorithm = Se$algorithm, map_mode = Se$map_mode)
+                algorithm = Se$algorithm)
     for (id in names(radios)) updateRadioButtons(session, id, selected = radios[[id]])
     updateSelectInput(session, "inst_placement", selected = I$placement)
     updateSelectInput(session, "inst_displacement", selected = I$displacement)
@@ -600,6 +597,7 @@ server <- function(input, output, session) {
     req(S)
     rv$S <- S; rv$job <- NULL; rv$state <- "running"; rv$tick <- rv$tick + 1
     rv$selected_run <- NULL
+    rv$alerts_shown <- 0
     nav_select("nav", "Live solver")
   }
   observeEvent(input$start_btn, start_session())
@@ -694,6 +692,15 @@ server <- function(input, output, session) {
     write.csv(S$results, S$results_file, row.names = FALSE)
     ls_log(S, "Re-scored with updated objective weights/directions.")
     rv$tick <- rv$tick + 1
+  })
+
+  # Surface run diagnostics (e.g. Ecospace not picking up the new maps) as they appear
+  observeEvent(rv$tick, {
+    a <- rv$S$alerts
+    if (length(a) > rv$alerts_shown) {
+      for (m in a[(rv$alerts_shown + 1):length(a)]) showNotification(m, type = "warning", duration = NULL)
+      rv$alerts_shown <- length(a)
+    }
   })
 
   session$onSessionEnded(function() {
