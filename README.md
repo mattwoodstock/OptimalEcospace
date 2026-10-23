@@ -10,3 +10,6 @@ This repository houses the methodology to turn the Ecospace console into an opti
   <img src="./R/Figures/Ecospace-seabed-types.png" width="80%" alt="Bathymetry map"><br>
   <i><b>Figure 2.</b> Initial seabed types embedded in the model.</i>
 </p>
+
+## Live Solver
+`R/LiveSolver` is an interactive Shiny app built on the same workflow. Select an Ecospace model, configure installation, decommissioning or mixed strategy constraints, and watch the solver iterate scenarios live. Launch it with `shiny::runApp("R/LiveSolver")`. See [R/LiveSolver/README.md](R/LiveSolver/README.md) for details.
