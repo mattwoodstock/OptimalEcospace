@@ -144,10 +144,15 @@ ls_region_info <- function(inputs_dir) {
   )
 }
 
-ls_find_console <- function() {
-  hits <- Sys.glob(c("C:/Program Files/EcoSpace Console*/EwEClientConsole.exe",
-                     "C:/Program Files (x86)/EcoSpace Console*/EwEClientConsole.exe"))
-  if (length(hits)) hits[length(hits)] else ls_default_console
+# Looks in a `console/` folder next to the app first (portable package), then Program Files
+ls_find_console <- function(repo_root = NULL) {
+  local <- if (!is.null(repo_root) && dir.exists(file.path(repo_root, "console"))) {
+    list.files(file.path(repo_root, "console"), pattern = "^EwEClientConsole\\.exe$",
+               recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
+  } else character()
+  hits <- c(local, Sys.glob(c("C:/Program Files/EcoSpace Console*/EwEClientConsole.exe",
+                              "C:/Program Files (x86)/EcoSpace Console*/EwEClientConsole.exe")))
+  if (length(hits)) normalizePath(hits[1], winslash = "/") else ls_default_console
 }
 
 # Default Configuration ----
@@ -174,7 +179,7 @@ ls_default_config <- function(repo_root) {
     hit <- grep("struct|reef", lyr$name, ignore.case = TRUE, value = TRUE)
     if (length(hit)) hit[1] else lyr$name[1]
   } else NA_character_
-  console <- ls_find_console()
+  console <- ls_find_console(repo_root)
 
   list(
     model = list(
@@ -848,6 +853,13 @@ ls_synthetic_objectives <- function(P, layers, objectives) {
 
 # Scoring ----
 
+# Derived columns that ls_score() recomputes from scratch
+ls_strip_scores <- function(df) {
+  if (is.null(df)) return(NULL)
+  drop <- names(df) %in% c("Composite_Score", "Pareto") | grepl("_vs_status_quo_pct$", names(df))
+  df[, !drop, drop = FALSE]
+}
+
 ls_score <- function(df, objectives) {
   ok <- df$finished %in% TRUE
   df$Composite_Score <- NA_real_
@@ -872,6 +884,14 @@ ls_score <- function(df, objectives) {
     b <- setdiff(cand, a)
     df$Pareto[a] <- !any(df$Composite_Score[b] >= df$Composite_Score[a] & df$total_cost[b] <= df$total_cost[a] &
                          (df$Composite_Score[b] > df$Composite_Score[a] | df$total_cost[b] < df$total_cost[a]))
+  }
+
+  # Percent change of each objective relative to the no-change baseline (status quo)
+  base <- which(df$kind == "baseline_none" & ok)
+  for (nm in objectives$name) {
+    v <- if (is.null(df[[nm]])) rep(NA_real_, nrow(df)) else suppressWarnings(as.numeric(df[[nm]]))
+    b <- if (length(base)) v[base[1]] else NA_real_
+    df[[paste0(nm, "_vs_status_quo_pct")]] <- if (is.finite(b) && b != 0) 100 * (v - b) / abs(b) else NA_real_
   }
   df
 }
@@ -1035,9 +1055,7 @@ ls_finish_job <- function(S, job) {
   row <- cbind(row, as.data.frame(obj, check.names = FALSE))
   write.csv(row, file.path(job$run_dir, "run_summary.csv"), row.names = FALSE)
 
-  prev <- S$results
-  if (!is.null(prev)) prev <- prev[, setdiff(names(prev), c("Composite_Score", "Pareto")), drop = FALSE]
-  S$results <- ls_score(rbind(prev, row), cfg$objectives)
+  S$results <- ls_score(rbind(ls_strip_scores(S$results), row), cfg$objectives)
   write.csv(S$results, S$results_file, row.names = FALSE)
 
   sc <- S$results$Composite_Score[nrow(S$results)]
