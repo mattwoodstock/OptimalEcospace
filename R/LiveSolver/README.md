@@ -59,7 +59,7 @@ Rscript run_headless.R path/to/config.json
 
 Sediment source data (`Inputs/dbSeaBed`), model backups, logs, `Backup_Base_Maps` and other working files are left out. Any new region or habitat layer added to an STConfig is picked up automatically.
 
-The *Live Solver package* GitHub Actions workflow builds the zip on every push that touches the app, `Inputs/` or `Model/`. It then unzips the package into an empty folder and runs a test-mode session there, to prove the package works on its own. On `main` it publishes the zip to the `live-solver` release, so the download link above always serves the current version. To build it locally, run `Rscript R/LiveSolver/build_package.R` from the repository root (the zip goes to `dist/`).
+The *Live Solver package* GitHub Actions workflow builds the zip on every push that touches the app, `Inputs/` or `Model/`. It then unzips the package into an empty folder on a Windows runner and runs a test-mode session there (`check_package.R`), to prove the package works on its own. On `main` it publishes the zip to the `live-solver` release, so the download link above always serves the current version. To build it locally, run `Rscript R/LiveSolver/build_package.R` from the repository root; the zip goes to `dist/` (on Windows it uses PowerShell if no zip program is installed).
 
 ## Comparing scenarios
 

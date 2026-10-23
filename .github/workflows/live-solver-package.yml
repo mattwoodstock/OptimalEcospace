@@ -1,6 +1,6 @@
 # Builds the Live Solver download (only the files needed to run it), checks that the
-# unpacked package runs on its own, and on `main` publishes it to the `live-solver`
-# release so the website link always serves the current version:
+# unpacked package runs on its own on Windows, and on `main` publishes it to the
+# `live-solver` release so the website link always serves the current version:
 #   https://github.com/mattwoodstock/OptimalEcospace/releases/download/live-solver/OptimalEcospace-LiveSolver.zip
 name: Live Solver package
 
@@ -19,38 +19,23 @@ permissions:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      - name: System libraries for terra
-        run: sudo apt-get update -q && sudo apt-get install -y -q libgdal-dev libgeos-dev libproj-dev
-
       - uses: r-lib/actions/setup-r@v2
-        with:
-          use-public-rspm: true
 
       - name: Install R packages
-        run: Rscript -e 'install.packages(c("shiny", "bslib", "DT", "processx", "terra", "xml2", "jsonlite"))'
+        run: Rscript -e "install.packages(c('shiny', 'bslib', 'DT', 'processx', 'terra', 'xml2', 'jsonlite'), type = 'binary')"
 
       - name: Build package
         run: Rscript R/LiveSolver/build_package.R dist
 
       - name: Smoke test the unpacked package
         run: |
-          mkdir -p "$RUNNER_TEMP/pkg"
-          unzip -q dist/OptimalEcospace-LiveSolver.zip -d "$RUNNER_TEMP/pkg"
-          cd "$RUNNER_TEMP/pkg/OptimalEcospace-LiveSolver/R/LiveSolver"
-          Rscript -e '
-            source("solver_engine.R")
-            root <- normalizePath("../..")
-            cfg <- ls_default_config(root)
-            cfg$search$iterations <- 5
-            cfg$search$dry_run <- TRUE
-            S <- ls_run_session(cfg, root)
-            stopifnot(nrow(S$results) == 7, all(S$results$finished))
-            invisible(shiny::shinyAppDir("."))
-            cat("Package runs on its own\n")'
+          Expand-Archive dist/OptimalEcospace-LiveSolver.zip -DestinationPath "$env:RUNNER_TEMP/pkg"
+          Rscript R/LiveSolver/check_package.R "$env:RUNNER_TEMP/pkg/OptimalEcospace-LiveSolver"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -59,6 +44,7 @@ jobs:
 
       - name: Publish to the live-solver release
         if: github.ref == 'refs/heads/main'
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

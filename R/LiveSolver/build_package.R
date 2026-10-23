@@ -62,10 +62,19 @@ for (f in files) {
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 zip_path <- normalizePath(file.path(out_dir, paste0(pkg_name, ".zip")), winslash = "/", mustWork = FALSE)
 unlink(zip_path)
-old <- setwd(dirname(stage))
-status <- utils::zip(zip_path, pkg_name, flags = "-r9Xq")
-setwd(old)
-if (status != 0) stop("zip failed (status ", status, ")")
+if (nzchar(Sys.which("zip"))) {
+  old <- setwd(dirname(stage))
+  status <- utils::zip(zip_path, pkg_name, flags = "-r9Xq")
+  setwd(old)
+} else if (.Platform$OS.type == "windows") {
+  # Windows without a zip program: PowerShell keeps the top-level package folder
+  status <- system2("powershell", c("-NoProfile", "-Command",
+    shQuote(sprintf("Compress-Archive -Path '%s' -DestinationPath '%s' -Force",
+                    normalizePath(stage), normalizePath(zip_path, mustWork = FALSE)))))
+} else {
+  stop("No zip program found.")
+}
+if (status != 0 || !file.exists(zip_path)) stop("zip failed (status ", status, ")")
 
 sizes <- file.size(file.path(repo_root, files))
 message(paste(sprintf("%-60s %8.1f KB", files, sizes / 1024), collapse = "\n"))
