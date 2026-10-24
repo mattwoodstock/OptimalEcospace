@@ -941,6 +941,13 @@ ls_new_session <- function(cfg, repo_root) {
   dir.create(S$session_dir, recursive = TRUE, showWarnings = FALSE)
   if (!is.na(ls_num(cfg$search$seed))) set.seed(ls_num(cfg$search$seed))
 
+  S$log <- character()
+  ls_log(S, sprintf("Live Solver version %s", ls_version()))
+  started <- FALSE
+  on.exit(if (!started) {
+    if (!is.null(S$restore)) for (k in seq_len(nrow(S$restore))) file.copy(S$restore$src[k], S$restore$dest[k], overwrite = TRUE)
+    unlink(file.path(cfg$model$inputs_dir, ls_lock_name))
+  }, add = TRUE)
   S$P <- ls_build_problem(cfg, S$session_dir)
   ls_save_config(cfg, file.path(S$session_dir, "solver_config.json"))
 
@@ -949,7 +956,6 @@ ls_new_session <- function(cfg, repo_root) {
   S$results <- NULL
   S$cands   <- list()
   S$seen    <- character()
-  S$log     <- character()
   S$results_file <- file.path(S$session_dir, "optimization_results.csv")
   S$closed  <- FALSE
 
@@ -969,14 +975,14 @@ ls_new_session <- function(cfg, repo_root) {
     S$spatiallog <- file.path(dirname(cfg$model$model_file),
                               paste0(sub("\\.eweaccdb$", "", basename(cfg$model$model_file)), "_spatiallog.txt"))
     ls_check_cache_dir(cfg$model$cache_dir %||% "", cfg)
-    S$cache_paths <- ls_find_spatial_cache(S$P$layers$guid, ls_cache_roots(cfg))
+    S$cache_paths <- ls_safe_cache_search(S)
     ls_log(S, if (length(S$cache_paths)) {
       sprintf("Ecospace spatial data cache for these layers: %s (cleared before every run)", paste(unique(dirname(S$cache_paths)), collapse = "; "))
     } else "No Ecospace spatial data cache found for these layers yet.")
   }
   S$alerts <- character()
   S$alert_keys <- character()
-  ls_log(S, sprintf("Live Solver version %s", ls_version()))
+  started <- TRUE
   ls_log(S, sprintf("Session %s | %s | strategy: %s | %d runs%s", basename(S$session_dir), basename(cfg$model$model_file),
                     cfg$strategy$type, S$total_runs, if (isTRUE(cfg$search$dry_run)) " | DRY RUN (synthetic objectives)" else ""))
   S
@@ -1151,6 +1157,15 @@ ls_check_cache_dir <- function(cd, cfg) {
   invisible(TRUE)
 }
 
+# The cache search is a convenience: a failure is logged, never fatal
+ls_safe_cache_search <- function(S) {
+  t0 <- Sys.time()
+  out <- tryCatch(suppressWarnings(ls_find_spatial_cache(S$P$layers$guid, ls_cache_roots(S$cfg))),
+                  error = function(e) { ls_log(S, paste("Cache search skipped:", conditionMessage(e))); character() })
+  ls_log(S, sprintf("Cache search took %.1f s", as.numeric(difftime(Sys.time(), t0, units = "secs"))))
+  out
+}
+
 # Folders searched for cache entries besides the user's AppData/Temp: next to the model, inputs and
 # package, and the console's install folder
 ls_cache_roots <- function(cfg) {
@@ -1169,15 +1184,22 @@ ls_find_spatial_cache <- function(guids, local_roots = character()) {
   sys_roots <- sys_roots[nzchar(sys_roots) & dir.exists(sys_roots)]
   ewe_dirs <- as.character(unlist(lapply(sys_roots, function(r) {
     d <- list.dirs(r, recursive = FALSE)
-    d[grepl("ecopath|ewe|ecospace|spatial", basename(d), ignore.case = TRUE)]
+    d[grepl("ecopath|ewe|ecospace|spatial", iconv(basename(d), "", "ASCII", sub = ""), ignore.case = TRUE) %in% TRUE]
   })))
   roots <- unique(c(local_roots[dir.exists(local_roots)], ewe_dirs))
   # Loose cache entries directly in AppData / Temp
+  # Names are reduced to ASCII first: GUIDs are ASCII, and odd file names elsewhere must not break the search
+  matches <- function(paths) {
+    if (!length(paths)) return(logical())
+    b <- tolower(iconv(basename(paths), "", "ASCII", sub = ""))
+    b[is.na(b)] <- ""
+    Reduce(`|`, lapply(guids, function(g) grepl(g, b, fixed = TRUE, useBytes = TRUE)))
+  }
   top <- as.character(unlist(lapply(sys_roots, list.files, full.names = TRUE, include.dirs = TRUE)))
-  hits <- top[vapply(tolower(basename(top)), function(b) any(vapply(guids, grepl, logical(1), x = b, fixed = TRUE)), logical(1))]
+  hits <- top[matches(top)]
   for (r in roots) {
     paths <- c(list.dirs(r, recursive = TRUE), list.files(r, recursive = TRUE, full.names = TRUE))
-    hits <- c(hits, paths[vapply(tolower(basename(paths)), function(b) any(vapply(guids, grepl, logical(1), x = b, fixed = TRUE)), logical(1))])
+    hits <- c(hits, paths[matches(paths)])
   }
   # Keep the outermost matches (deleting a folder removes its contents)
   hits <- unique(normalizePath(hits, winslash = "/", mustWork = FALSE))
@@ -1211,7 +1233,7 @@ ls_check_run <- function(S, job, obj) {
       S$results$kind[S$results$run == job$run] <- "probe"
       before <- length(S$cache_paths)
       if (!before) {
-        S$cache_paths <- ls_find_spatial_cache(S$P$layers$guid, ls_cache_roots(S$cfg))
+        S$cache_paths <- ls_safe_cache_search(S)
       }
       found_now <- !before && length(S$cache_paths)
       if (nzchar(S$cfg$model$cache_dir %||% "")) found_now <- FALSE

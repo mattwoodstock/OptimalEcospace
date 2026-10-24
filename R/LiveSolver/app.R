@@ -624,9 +624,12 @@ server <- function(input, output, session) {
       showNotification("Ecospace console not found. Set its location on the Start here tab, or switch on test mode.", type = "error"); return()
     }
     if (!nrow(cfg$objectives)) { showNotification("Define at least one objective.", type = "error"); return() }
+    showNotification("Starting: preparing maps and checking Ecospace's cache...", id = "starting", duration = NULL)
     S <- tryCatch(ls_new_session(cfg, repo_root), error = function(e) {
-      showNotification(paste("Could not start:", conditionMessage(e)), type = "error", duration = 15); NULL
+      message("Could not start: ", conditionMessage(e))
+      showNotification(paste("Could not start:", conditionMessage(e)), type = "error", duration = NULL); NULL
     })
+    removeNotification("starting")
     req(S)
     rv$S <- S; rv$job <- NULL; rv$state <- "running"; rv$tick <- rv$tick + 1
     rv$selected_run <- NULL
