@@ -8,8 +8,7 @@ An interactive (Shiny) front end for the OptimalEcospace optimization loop. It f
 2. For real scenarios, install the **Ecospace console** (`EwEClientConsole.exe`, Windows). Without it the app still runs in **test mode**, which uses made-up scores so you can learn the interface.
 3. Download **[OptimalEcospace-LiveSolver.zip](https://github.com/mattwoodstock/OptimalEcospace/releases/download/live-solver/OptimalEcospace-LiveSolver.zip)** (about 1.5 MB) and unzip it, ideally to a short path such as `C:\OptimalEcospace`. It contains only what the Live Solver needs (see *Building the download* below). Cloning the whole repository works too.
 4. Start the app:
-   * **Windows:** double-click `Start Live Solver.bat` in the repository folder.
-   * **RStudio:** open `R/LiveSolver/launch.R` and click **Source**.
+   * **RStudio:** open `Start Live Solver.R` (in the unzipped folder) and click **Source**.
    * **Any R console:** `source("R/LiveSolver/launch.R")` from the repository folder.
 
 The first start installs the R packages it needs (`shiny`, `bslib`, `DT`, `processx`, `terra`, `xml2`, `jsonlite`), which takes a few minutes. The app opens in your web browser; keep the R window open while you use it.
@@ -58,7 +57,7 @@ Structure layers hold the **proportion of each cell that is structure** (0-1), w
 
 `build_package.R` assembles `OptimalEcospace-LiveSolver.zip` with only the files a run needs:
 
-* the app and launcher (`Start Live Solver.bat`, `R/LiveSolver/*.R`)
+* the app and launcher (`Start Live Solver.R`, `R/LiveSolver/*.R`). The download contains no programs or batch files, so browsers have nothing to flag.
 * for each region in `Inputs/`, the model named by `<EWE_MODEL_FILE>` in its command-file template
 * the region's STConfig file, command-file template, and the rasters the solver reads or rewrites: every habitat layer in the STConfig, `basemap.asc`, `exclusions.asc`, `cost_map.asc`, and the pristine copies of the habitat layers in `Inputs/<region>/Initial Base Mapps/` when that folder exists
 
@@ -84,17 +83,12 @@ Each session writes to `Outputs/<region>/LiveSolver_<timestamp>/`:
 
 Ecospace reads one fixed STConfig file and the map files it lists, so the solver works the same way `structure_optimization.R` does. Every scenario starts from the pristine maps (`Inputs/<region>/Initial Base Mapps/` when present; put your original habitat layers there, under the same file names). Before every run the solver writes the scenario's layers straight over the map files in `Inputs/<region>/` and writes a command file that differs from the template only in the output folder and the model and STConfig paths. A copy of each run's layers is also kept in its `Maps/` folder.
 
+* **Existing reefs.** As in `structure_optimization.R`, when `Inputs/reeflocations.csv` (the FWC artificial reef deployments) is present, the existing reef cover is built from it. Each reef covers a halo of the installation panel's halo radius (default 500 m), and a cell's cover is the share of the cell inside those halos. The Alabama reef zone has no point data. Its reef cells (where `Initial Base Mapps/structures_init.asc` has reef, in the first 19 columns) get the mean cover of the Florida reef cells. Land and excluded cells are set to 0. Choose *From the structure map* under **Model & run → Existing reefs** to use `structures_all.asc` as it is.
+* Ecospace reads map files by row and column and ignores their coordinates, and the solver does the same. A map with the basemap's rows and columns is used cell for cell even if its header places it elsewhere (in NGoM, the `Initial Base Mapps` basemap and structure map say `yllcorner 29.28`, the other maps `30.25`). Only a map with a different number of rows or columns is resampled.
 * The region's own STConfig (e.g. `Inputs/NGoM/NGoMSTConfig.xml`) is used, with its file paths repaired in place to point at this folder's `Inputs` maps. This matters because the stored paths can come from another computer.
 * Before the first run, the original maps and STConfig are snapshotted. They are restored when the session finishes, is stopped, or the browser tab closes. If R crashes mid-session, a `.livesolver_lock` file stays in the Inputs folder, and the next session (app or headless) restores the snapshot automatically before it starts.
 * **Ecospace may read a different set of map files.** The console can follow the spatial configuration saved inside the model rather than the one it is given (for example, your original working folder). After the first run, the solver reads Ecospace's spatial log, which lists exactly which map files were loaded. If they are elsewhere, it switches to updating those files (snapshotting them first and restoring them afterwards), tells you where they are, and repeats the status quo run with its own maps. The first run is kept as a `probe` and is not scored.
-* **Ecospace's spatial data cache.** Ecospace can keep converted copies of the habitat layers and reuse them instead of re-reading the map files. Its spatial log then says "Loaded from cache", and every scenario looks like the status quo. Find the cache folder once and enter it under **Ecospace spatial cache folder** on the Start here tab; the solver empties it before every run. The tab shows a PowerShell command, filled in with your structure layer's dataset ID from the STConfig, that finds the folder:
-
-  ```powershell
-  Get-ChildItem $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP, "$env:USERPROFILE\Documents", "C:\Program Files\EcoSpace Console*" -Recurse -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -like "*08e81913-15bb-41bd-855e-b0e6167305fe*" } | Select-Object FullName
-  ```
-
-  The console and cache locations are remembered on that computer in `LiveSolver_settings.json`. The solver does not search for the cache itself. Drive roots, user folders and folders that contain the model or the Live Solver are refused. If a run still reports "Loaded from cache", it is not scored. If that happens to the status quo run, the session stops and says so.
+* **Ecospace's spatial data cache.** Ecospace keeps converted copies of every external habitat layer in `%APPDATA%\<console name>\Cache\Spatial\<dataset ID>\`. The cache is keyed only by the layer's dataset ID (GUID in the STConfig), extent, cell size and date, so a rewritten map file never refreshes it on its own. Before every run, the solver finds that folder itself and deletes the entries for this model's layers, so Ecospace reads the maps again. Nothing needs to be set up. The spatial log says "Loaded from cache" even then, because Ecospace reads the maps through the cache it has just filled. If an entry can't be deleted (for example because Ecospace is open in another program), the run is not scored. If that happens on the status quo run, the session stops and says so.
 * Each copy is verified. If a map can't be overwritten (for example because it is open in another program), the session stops with a message.
 * After each run, the solver keeps Ecospace's spatial log (`<model>_spatiallog.txt`) in the run folder. It warns in the log and in the app if Ecospace did not load the overwritten structure map, or if a scenario that changed structures produced outcomes identical to the status quo.
 

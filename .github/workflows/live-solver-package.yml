@@ -10,7 +10,7 @@ on:
       - "R/LiveSolver/**"
       - "Inputs/**"
       - "Model/**"
-      - "Start Live Solver.bat"
+      - "Start Live Solver.R"
       - ".github/workflows/live-solver-package.yml"
   workflow_dispatch:
 
@@ -39,8 +39,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
+          # The unpacked folder, so the artifact download is a single zip (not a zip inside a zip)
           name: OptimalEcospace-LiveSolver
-          path: dist/OptimalEcospace-LiveSolver.zip
+          path: ${{ runner.temp }}/pkg
 
       - name: Publish to the live-solver release
         if: github.ref == 'refs/heads/main'
@@ -48,7 +49,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes="Live Solver download built from ${GITHUB_SHA::7}. Unzip, then double-click 'Start Live Solver.bat' (or source R/LiveSolver/launch.R in RStudio)."
+          notes="Live Solver download built from ${GITHUB_SHA::7}. Unzip, open 'Start Live Solver.R' in RStudio and click Source."
           if gh release view live-solver >/dev/null 2>&1; then
             gh release edit live-solver --notes "$notes"
           else

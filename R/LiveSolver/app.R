@@ -64,9 +64,6 @@ ui <- page_navbar(
           "Ecospace console", span(class = "small text-muted", paste("Version", ls_version()))),
         textInput("console_path", "Location of EwEClientConsole.exe", defaults$model$console_path, width = "100%"),
         uiOutput("console_status"),
-        textInput("cache_dir", "Ecospace spatial cache folder", defaults$model$cache_dir, width = "100%",
-                  placeholder = "Folder where Ecospace caches habitat layers; emptied before every run"),
-        uiOutput("cache_help"),
         p(class = "small",
           "Real scenarios need the Ecospace console installed on this Windows computer. Without it you can",
           "still try everything in ", strong("test mode"), ", which uses made-up scores so you can learn the tool."),
@@ -103,6 +100,9 @@ ui <- page_navbar(
           selectInput("natural_habitats", "Natural habitat layers displaced / restored", choices = NULL, multiple = TRUE),
           selectInput("basemap_file", "Basemap (depth)", choices = NULL),
           selectInput("existing_file", "Existing structures map", choices = NULL),
+          radioButtons("reef_baseline", "Existing reefs", c(
+            "Automatic: from reeflocations.csv when present (reef halos; Alabama zone gets the mean cover)" = "auto",
+            "From the structure map" = "map")),
           radioButtons("existing_cover", "Cover of each existing structure cell", c(
             "Automatic: keep fractional maps; presence (0/1) maps get one module's cover" = "auto",
             "As stored in the map" = "as_mapped",
@@ -350,24 +350,6 @@ server <- function(input, output, session) {
   })
   region <- reactive(ls_region_info(model_row()$inputs_dir))
 
-  # How to find Ecospace's cache once: search for the structure layer's dataset ID from the STConfig
-  output$cache_help <- renderUI({
-    lyr <- region()$layers
-    guid <- lyr$guid[lyr$name == (input$structure_layer %||% "")]
-    if (!length(guid) || is.na(guid[1])) guid <- lyr$guid[1]
-    tags$details(class = "small mb-2",
-      tags$summary("How to find this folder (one time)"),
-      p("Ecospace keeps copies of habitat layers in a cache and may reuse them instead of the maps the solver writes.",
-        "Its spatial log then says 'Loaded from cache' and every scenario looks like the status quo.",
-        "To find the cache, run this in PowerShell and enter the folder that holds the result:"),
-      tags$pre(style = "white-space:pre-wrap", sprintf(paste0(
-        "Get-ChildItem $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP, \"$env:USERPROFILE\\Documents\", ",
-        "\"C:\\Program Files\\EcoSpace Console*\" -Recurse -ErrorAction SilentlyContinue |\n",
-        "  Where-Object { $_.Name -like \"*%s*\" } | Select-Object FullName"), guid[1])),
-      p("The folder is remembered on this computer. Its contents are deleted before every run, so choose the cache folder itself;",
-        "general folders and folders that contain the model or the Live Solver are refused."))
-  })
-
   output$console_status <- renderUI({
     if (file.exists(input$console_path)) {
       div(class = "alert alert-success py-2", icon("check"), "Console found. Real Ecospace scenarios are available.")
@@ -490,8 +472,8 @@ server <- function(input, output, session) {
   region_defaults <- reactive({
     bf <- input$basemap_file
     if (is.null(bf) || !nzchar(bf)) bf <- "basemap.asc"
-    f <- file.path(model_row()$inputs_dir, bf)
-    req(file.exists(f))
+    f <- ls_basemap_path(model_row()$inputs_dir, bf, input$pristine_source %||% "auto")
+    req(!is.na(f), file.exists(f))
     b <- terra::rast(f)
     d <- terra::values(b, mat = FALSE); d <- d[!is.na(d) & d > 0]
     e <- unname(as.vector(terra::ext(b)))
@@ -512,7 +494,6 @@ server <- function(input, output, session) {
       model = list(
         region = m$region, model_file = m$model_file, inputs_dir = m$inputs_dir,
         stconfig = info$stconfig, cmd_template = info$cmd_template, console_path = input$console_path,
-        cache_dir = input$cache_dir %||% "",
         ecosim_scenario = nv("ecosim_scenario", defaults$model$ecosim_scenario), ecospace_scenario = nv("ecospace_scenario", defaults$model$ecospace_scenario),
         n_years = nv("n_years", defaults$model$n_years), use_spinup = input$use_spinup, spinup_years = nv("spinup_years", defaults$model$spinup_years),
         timesteps_year = nv("timesteps_year", defaults$model$timesteps_year), n_threads = nv("n_threads", defaults$model$n_threads), timeout_sec = nv("timeout_sec", defaults$model$timeout_sec),
@@ -521,7 +502,9 @@ server <- function(input, output, session) {
       layers = list(
         structure_layer = input$structure_layer, existing_file = input$existing_file,
         natural_habitats = input$natural_habitats %||% character(), basemap_file = input$basemap_file,
-        pristine_source = input$pristine_source %||% "auto", existing_cover = input$existing_cover %||% "auto"
+        pristine_source = input$pristine_source %||% "auto", existing_cover = input$existing_cover %||% "auto",
+        reef_baseline = input$reef_baseline %||% "auto", baseline_fill_map = defaults$layers$baseline_fill_map,
+        baseline_fill_cols = defaults$layers$baseline_fill_cols
       ),
       strategy = list(type = input$strategy_type, shared_budget = input$shared_budget),
       install = list(
@@ -592,13 +575,13 @@ server <- function(input, output, session) {
                 dry_run = Se$dry_run)
     for (id in names(checks)) updateCheckboxInput(session, id, value = isTRUE(checks[[id]]))
     radios <- c(pristine_source = cfg$layers$pristine_source %||% "auto", existing_cover = cfg$layers$existing_cover %||% "auto",
+                reef_baseline = cfg$layers$reef_baseline %||% "auto",
                 strategy_type = cfg$strategy$type, dec_cost_source = D$cost_source,
                 algorithm = Se$algorithm)
     for (id in names(radios)) updateRadioButtons(session, id, selected = radios[[id]])
     updateSelectInput(session, "inst_displacement", selected = I$displacement)
     updateSelectInput(session, "dec_selection", selected = D$selection)
     updateTextInput(session, "console_path", value = M$console_path)
-    updateTextInput(session, "cache_dir", value = M$cache_dir %||% "")
     updateTextAreaInput(session, "extra_tags", value = M$extra_tags %||% "")
     objectives(cfg$objectives)
     if (!is.null(cfg$econ$prices)) prices(as.data.frame(cfg$econ$prices, stringsAsFactors = FALSE))
@@ -689,7 +672,7 @@ server <- function(input, output, session) {
       showNotification("Ecospace console not found. Set its location on the Start here tab, or switch on test mode.", type = "error"); return()
     }
     if (!nrow(cfg$objectives)) { showNotification("Define at least one objective.", type = "error"); return() }
-    showNotification("Starting: preparing maps and checking Ecospace's cache...", id = "starting", duration = NULL)
+    showNotification("Starting: preparing maps...", id = "starting", duration = NULL)
     S <- tryCatch(ls_new_session(cfg, repo_root), error = function(e) {
       message("Could not start: ", conditionMessage(e))
       showNotification(paste("Could not start:", conditionMessage(e)), type = "error", duration = NULL); NULL

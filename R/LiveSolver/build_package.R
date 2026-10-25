@@ -23,7 +23,7 @@ pkg_name <- "OptimalEcospace-LiveSolver"
 source(file.path(repo_root, "R/LiveSolver/solver_engine.R"))
 
 # App and launcher ----
-files <- c("Start Live Solver.bat",
+files <- c("Start Live Solver.R",
            file.path("R/LiveSolver", c("app.R", "solver_engine.R", "launch.R", "run_headless.R", "README.md")))
 
 # Per region: the model named in the command template + every map/config a run reads ----
@@ -49,10 +49,15 @@ for (reg in list.dirs(file.path(repo_root, "Inputs"), full.names = FALSE, recurs
                                     defaults$decom$cost_map_file)))
   # Pristine copies of the habitat layers ("Initial Base Mapps"), read before every scenario
   pdir <- ls_pristine_dir(inputs_dir, "auto")
-  if (!is.null(pdir)) maps <- c(maps, file.path(pdir, basename(info$layers$file)))
+  if (!is.null(pdir)) maps <- c(maps, file.path(pdir, c(basename(info$layers$file), defaults$layers$basemap_file,
+                                                        defaults$install$exclusions_file,
+                                                        defaults$layers$baseline_fill_map)))
   maps <- maps[file.exists(maps)]
   files <- c(files, model_rel, rel(info$stconfig), rel(info$cmd_template), vapply(maps, rel, ""))
 }
+# Reef locations used to build the existing reef baseline (Inputs/ or Inputs/<region>/)
+files <- c(files, sub(paste0("^", repo_root, "/"), "",
+                      list.files(file.path(repo_root, "Inputs"), "^reeflocations\\.csv$", recursive = TRUE, full.names = TRUE)))
 files <- unique(files)
 
 # Assemble and zip ----

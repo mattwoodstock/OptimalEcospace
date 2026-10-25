@@ -7,8 +7,8 @@
 ###  the web browser.                             ###
 ###                                               ###
 ### Use one of:                                   ###
-###  - double-click "Start Live Solver.bat"       ###
-###    (Windows, repository root)                 ###
+###  - RStudio: open "Start Live Solver.R"        ###
+###    (repository root) and press "Source"       ###
 ###  - RStudio: open this file and press "Source" ###
 ###  - R console: source("R/LiveSolver/launch.R") ###
 #####################################################

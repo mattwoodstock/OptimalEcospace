@@ -212,7 +212,7 @@ ls_default_econ <- function() {
   )
 }
 
-# Machine-specific settings (console and cache locations) remembered between sessions
+# Machine-specific settings (console location) remembered between sessions
 ls_settings_file <- function(repo_root) file.path(repo_root, "LiveSolver_settings.json")
 
 ls_read_settings <- function(repo_root) {
@@ -222,7 +222,7 @@ ls_read_settings <- function(repo_root) {
 }
 
 ls_save_settings <- function(repo_root, cfg) {
-  tryCatch(write_json(list(console_path = cfg$model$console_path, cache_dir = cfg$model$cache_dir %||% ""),
+  tryCatch(write_json(list(console_path = cfg$model$console_path),
                       ls_settings_file(repo_root), auto_unbox = TRUE, pretty = TRUE),
            error = function(e) NULL)
 }
@@ -274,7 +274,6 @@ ls_default_config <- function(repo_root) {
       run,              # scenario indices, years, spin-up, time steps, threads (template values)
       list(
       timeout_sec       = 1800,
-      cache_dir         = saved$cache_dir %||% "",  # Ecospace's spatial data cache folder, emptied before every run
       extra_tags        = ""      # raw command-file lines appended verbatim (e.g. vulnerabilities)
     )),
     layers = list(
@@ -284,6 +283,11 @@ ls_default_config <- function(repo_root) {
       basemap_file      = "basemap.asc",
       pristine_source   = "auto",  # auto: Inputs/<region>/Initial Base Mapps when present, else Inputs;
                                    # inputs: current Inputs files; backup: Backup_Base_Maps
+      reef_baseline     = "auto",  # auto: build existing reef cover from reeflocations.csv when present
+                                   # (as structure_optimization.R); map: use the structure map as is
+      baseline_fill_map = "structures_init.asc", # cells with reef here, in the first columns, get
+      baseline_fill_cols = 19,                    # the mean coverage of the CSV cells (the Alabama
+                                                  # reef zone, which has no point data)
       existing_cover    = "auto"   # auto: keep fractional maps, give presence (0/1) maps one module's cover;
                                    # as_mapped: keep values; one_module: one module's cover per structure cell
     ),
@@ -385,10 +389,99 @@ ls_load_config <- function(path, repo_root) {
 
 # Problem Construction ----
 
+# Reef locations CSV (FWC artificial reef deployments): Inputs/<region>/ or Inputs/ (the script's location)
+ls_reef_csv <- function(inputs_dir) {
+  f <- c(file.path(inputs_dir, "reeflocations.csv"), file.path(dirname(inputs_dir), "reeflocations.csv"))
+  f <- f[file.exists(f)]
+  if (length(f)) normalizePath(f[1], winslash = "/") else NA_character_
+}
+
+ls_read_reef_csv <- function(csv) {
+  # Two title lines, then the header; the file is Latin-1 (degree signs in the DM columns)
+  txt <- readLines(csv, warn = FALSE, encoding = "latin1")
+  txt <- iconv(txt, "latin1", "UTF-8", sub = "")
+  df  <- utils::read.csv(text = txt, skip = 2, check.names = FALSE, stringsAsFactors = FALSE)
+  lat <- suppressWarnings(as.numeric(df[["Lat (DD)"]])); lon <- suppressWarnings(as.numeric(df[["Long (DD)"]]))
+  ok  <- !is.na(lat) & !is.na(lon)
+  data.frame(lat = lat[ok], lon = lon[ok])
+}
+
+# Baseline reef cover (fn.generate_baseline_map in structure_optimization.R): each reef covers a halo
+# of radius halo_m; a cell's value is the share of its 10 m sub-grid inside any halo of its reefs.
+# Cells with reef in fill_map within the first fill_cols columns (the Alabama zone, no point data)
+# get the mean coverage of the CSV cells to their east. Land and cells excluded (< 0.5) are set to 0.
+# Returns values in the template's cell order. Cached, because the preview rebuilds the problem often.
+ls_baseline_cache <- new.env()
+ls_reef_baseline <- function(csv, template, halo_m = 500, fill_map = NA, fill_cols = 19, excl_file = NA) {
+  key <- paste(csv, file.mtime(csv), halo_m, fill_map, if (!is.na(fill_map)) file.mtime(fill_map),
+               fill_cols, excl_file, if (!is.na(excl_file)) file.mtime(excl_file),
+               paste(as.vector(ext(template)), collapse = ","), nrow(template), ncol(template))
+  if (!is.null(ls_baseline_cache[[key]])) return(ls_baseline_cache[[key]])
+
+  pts  <- ls_read_reef_csv(csv)
+  nr <- nrow(template); nc <- ncol(template)
+  x0 <- xmin(template); y0 <- ymin(template); cs <- res(template)[1]
+  cx <- floor((pts$lon - x0) / cs); cy <- floor((pts$lat - y0) / cs)   # cy counts rows from the bottom
+  ok <- cx >= 0 & cx < nc & cy >= 0 & cy < nr
+  pts <- pts[ok, ]; cx <- cx[ok]; cy <- cy[ok]
+  cov <- matrix(0, nr, nc)                                             # [cy + 1, cx + 1], bottom row first
+  sub <- 10
+  for (k in unique(cy * nc + cx)) {
+    j <- which(cy * nc + cx == k); y <- cy[j[1]]; x <- cx[j[1]]
+    lat_rad <- (y0 + y * cs) * pi / 180
+    m_lat <- 111132.954 - 559.822 * cos(2 * lat_rad) + 1.175 * cos(4 * lat_rad)
+    m_lon <- 111412.84 * cos(lat_rad) - 93.5 * cos(3 * lat_rad)
+    gw <- ceiling(cs * m_lon / sub) + 1; gh <- ceiling(cs * m_lat / sub) + 1
+    hit <- matrix(FALSE, gh, gw)
+    r <- halo_m / sub
+    for (i in j) {
+      px <- (pts$lon[i] - (x0 + x * cs)) * m_lon / sub + 1
+      py <- (pts$lat[i] - (y0 + y * cs)) * m_lat / sub + 1
+      cols <- max(1, ceiling(px - r)):min(gw, floor(px + r))
+      rows <- max(1, ceiling(py - r)):min(gh, floor(py + r))
+      if (length(cols) && length(rows) && min(cols) <= max(cols) && min(rows) <= max(rows)) {
+        d2 <- outer((rows - py)^2, (cols - px)^2, `+`)
+        hit[rows, cols] <- hit[rows, cols] | d2 <= r^2
+      }
+    }
+    cov[y + 1, x + 1] <- sum(hit) / (gw * gh)
+  }
+  vals <- as.vector(t(cov[nr:1, , drop = FALSE]))                     # to template cell order (top row first)
+
+  fill_cols <- min(max(0, fill_cols), nc - 1)
+  east <- cov[, (fill_cols + 1):nc]
+  mean_cov <- if (any(east > 0)) mean(east[east > 0]) else NA
+  if (!is.na(fill_map) && !is.na(mean_cov) && fill_cols > 0) {
+    fm <- ls_read_layer(fill_map, template); fm[is.na(fm)] <- 0
+    col <- (seq_along(vals) - 1) %% nc + 1
+    vals[col <= fill_cols & fm > 0] <- mean_cov
+  }
+  bm <- values(template, mat = FALSE)
+  vals[is.na(bm) | bm <= 0] <- 0
+  if (!is.na(excl_file)) {
+    ex <- ls_read_layer(excl_file, template); ex[is.na(ex)] <- 0
+    vals[ex < 0.5] <- 0
+  }
+  attr(vals, "n_reefs") <- nrow(pts); attr(vals, "mean_cover") <- mean_cov
+  ls_baseline_cache[[key]] <- vals
+  vals
+}
+
+# Ecospace reads .asc layers by row and column and ignores their coordinates, so a layer with the
+# basemap's rows and columns is taken cell for cell even if its header places it elsewhere (some
+# NGoM maps say yllcorner 29.28, others 30.25). Only a different grid size is resampled.
 ls_read_layer <- function(path, template, method = "near") {
   r <- rast(path)
-  if (!compareGeom(template, r, stopOnError = FALSE)) r <- resample(r, template, method = method)
-  values(r, mat = FALSE)
+  if (nrow(r) == nrow(template) && ncol(r) == ncol(template)) return(values(r, mat = FALSE))
+  values(resample(r, template, method = method), mat = FALSE)
+}
+
+# The basemap the solver uses: the pristine folder's copy when present (as structure_optimization.R)
+ls_basemap_path <- function(inputs_dir, basemap_file = "basemap.asc", pristine_source = "auto") {
+  f <- ls_resolve(basemap_file, inputs_dir)
+  if (is.na(f)) return(f)
+  pd <- ls_pristine_dir(inputs_dir, pristine_source)
+  if (!is.null(pd) && file.exists(file.path(pd, basename(f)))) file.path(pd, basename(f)) else f
 }
 
 ls_resolve <- function(file, inputs_dir) {
@@ -544,9 +637,9 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
     for (f in used$file) file.copy(f, file.path(snapshot_dir, basename(f)), overwrite = TRUE)
   }
 
-  basemap_file <- ls_resolve(L$basemap_file, inputs_dir)
+  basemap_file <- ls_basemap_path(inputs_dir, L$basemap_file, L$pristine_source %||% "auto")
   if (is.na(basemap_file)) stop("Basemap not found: ", L$basemap_file)
-  template <- rast(pristine_file(basemap_file))
+  template <- rast(basemap_file)
   nr <- nrow(template); nc <- ncol(template)
   depth <- values(template, mat = FALSE)
   water <- !is.na(depth) & depth > 0
@@ -557,6 +650,16 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
   struct_file <- used$file[used$name == L$structure_layer]
   struct0 <- ls_read_layer(pristine_file(struct_file), template)
   struct0[is.na(struct0)] <- 0
+  # Existing reef cover from the reef locations CSV, as structure_optimization.R does
+  baseline_csv <- if (!identical(L$reef_baseline, "map")) ls_reef_csv(inputs_dir) else NA_character_
+  if (!is.na(baseline_csv)) {
+    excl_f <- pristine_file(file.path(inputs_dir, I$exclusions_file %||% "exclusions.asc"))
+    fill_f <- pristine_file(file.path(inputs_dir, L$baseline_fill_map %||% "structures_init.asc"))
+    struct0 <- ls_reef_baseline(baseline_csv, template, ls_num(I$halo_base_m, 500),
+                                if (file.exists(fill_f)) fill_f else NA_character_,
+                                ls_num(L$baseline_fill_cols, 19),
+                                if (file.exists(excl_f)) excl_f else NA_character_)
+  }
   raw_hab <- setNames(lapply(natural, function(h) ls_read_layer(pristine_file(used$file[used$name == h]), template, "bilinear")), natural)
 
   existing_f <- ls_resolve(L$existing_file, inputs_dir)
@@ -626,7 +729,7 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
   type <- cfg$strategy$type
   P <- list(
     cfg = cfg, session_dir = session_dir, snapshot_dir = snapshot_dir, recovered = recovered,
-    pristine_dir = pristine_dir,
+    pristine_dir = pristine_dir, baseline_csv = baseline_csv,
     template = template, nr = nr, nc = nc, depth = depth, water = water, xy = xy,
     cell_area_m2 = cell_area_m2, neighbors = neighbors,
     total_area_km2 = sum(cell_area_m2[!is.na(depth)], na.rm = TRUE) / 1e6,
@@ -647,13 +750,17 @@ ls_problem_summary <- function(P) {
   dc <- P$decom_cost[P$decom_eligible]
   rng <- function(x, f) if (length(x)) { r <- range(x); if (diff(r) < 1e-9 * max(1, abs(r[1]))) f(r[1]) else paste(f(r[1]), "-", f(r[2])) } else "-"
   data.frame(
-    item = c("Grid (rows x cols)", "Water cells", "Pristine maps", "Existing structure cells",
+    item = c("Grid (rows x cols)", "Water cells", "Pristine maps", "Existing reefs from", "Existing structure cells",
              "Existing structure cover (min - max of cell)", "Cells eligible for modules",
              "Cost per module", "Cell cover from one module", "Budget per scenario",
              "Structures eligible for decommissioning", "Removal cost"),
     value = c(
       sprintf("%d x %d", P$nr, P$nc), sum(P$water),
       if (is.null(P$pristine_dir)) "Inputs folder" else basename(P$pristine_dir),
+      if (is.na(P$baseline_csv %||% NA)) "structure map" else
+        sprintf("%s (%d reefs in the grid, %s halo; fill cover %s)", basename(P$baseline_csv),
+                attr(P$struct0, "n_reefs") %||% 0L, paste0(ls_num(I$halo_base_m, 500), " m"),
+                ls_pct(attr(P$struct0, "mean_cover") %||% NA)),
       sum(P$struct0 > 0),
       if (any(P$struct0 > 0)) paste(ls_pct(min(P$struct0[P$struct0 > 0])), "-", ls_pct(max(P$struct0))) else "-",
       length(P$install_valid),
@@ -1222,10 +1329,11 @@ ls_new_session <- function(cfg, repo_root) {
     S$stconfig <- ls_write_stconfig(stc, S$targets, stc)
     S$spatiallog <- file.path(dirname(cfg$model$model_file),
                               paste0(sub("\\.eweaccdb$", "", basename(cfg$model$model_file)), "_spatiallog.txt"))
-    cd <- cfg$model$cache_dir %||% ""
-    ls_check_cache_dir(cd, cfg)
-    ls_log(S, if (nzchar(cd)) sprintf("Ecospace spatial cache folder: %s (emptied before every run)", cd) else
-      "No Ecospace spatial cache folder set; if Ecospace loads layers from its cache, the session stops and says so.")
+    S$guids <- S$P$layers$guid[!is.na(S$P$layers$guid)]
+    roots <- ls_ewe_cache_roots()
+    ls_log(S, if (length(roots)) paste("Ecospace spatial cache:", paste(roots, collapse = "; "),
+                                       "- this model's layers are cleared from it before every run") else
+      "No Ecospace spatial cache yet; it is looked for again (and cleared) before every run.")
   }
   S$alerts <- character()
   S$alert_keys <- character()
@@ -1334,8 +1442,9 @@ ls_start_job <- function(S, job) {
     }
   }
   # Ecospace caches converted habitat layers and reuses them instead of re-reading the files
-  cd <- cfg$model$cache_dir %||% ""
-  if (nzchar(cd) && dir.exists(cd)) unlink(list.files(cd, full.names = TRUE, all.files = TRUE, no.. = TRUE), recursive = TRUE, force = TRUE)
+  ls_clear_ewe_cache(S$guids)
+  left <- list.files(ls_ewe_cache_dirs(S$guids), recursive = TRUE, full.names = TRUE)   # could not be deleted
+  job$cache_left <- setNames(as.numeric(file.mtime(left)), left)
   cmd <- ls_write_cmd(P, job$run_dir, S$stconfig)
 
   console <- cfg$model$console_path
@@ -1417,22 +1526,28 @@ ls_finish_job <- function(S, job) {
   invisible(row)
 }
 
-# A user-entered cache folder is emptied before every run, so refuse anything that looks like a
-# general-purpose folder or that holds the model, inputs or the Live Solver itself
-ls_check_cache_dir <- function(cd, cfg) {
-  if (!nzchar(cd)) return(invisible(TRUE))
-  if (!dir.exists(cd)) stop("The Ecospace spatial cache folder does not exist: ", cd)
-  np <- function(x) tolower(sub("/+$", "", normalizePath(x, winslash = "/", mustWork = FALSE)))
-  c0 <- np(cd)
-  home <- Sys.getenv(c("USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA", "TEMP", "TMP", "PROGRAMFILES"))
-  home <- home[nzchar(home)]
-  protected <- np(c(home, file.path(home, "Documents"), file.path(home, "Desktop"), file.path(home, "Downloads")))
-  keep <- np(c(cfg$model$model_file, cfg$model$inputs_dir, cfg$model$console_path, getwd()))
-  if (grepl("^[a-z]:$|^$", c0) || c0 %in% protected || any(startsWith(paste0(keep, "/"), paste0(c0, "/")))) {
-    stop("Refusing to use '", cd, "' as the Ecospace spatial cache folder: its contents are deleted before every run, ",
-         "and this looks like a general folder or contains the model or the Live Solver. Choose the cache folder itself.")
-  }
-  invisible(TRUE)
+# Ecospace's spatial data cache (EwECore cSpatialDataCache): converted copies of each external
+# layer under %APPDATA%\<console product name>\Cache\Spatial\<dataset GUID>\..., keyed only by
+# GUID, extent, cell size and date. A rewritten map file never invalidates it, so the solver deletes
+# this model's GUID folders before every run and Ecospace has to read the maps again.
+ls_ewe_cache_roots <- function() {
+  base <- Sys.getenv(c("APPDATA", "LOCALAPPDATA"))
+  base <- unique(base[nzchar(base) & dir.exists(base)])
+  roots <- file.path(unlist(lapply(base, list.dirs, recursive = FALSE, full.names = TRUE)), "Cache", "Spatial")
+  roots[dir.exists(roots)]
+}
+
+ls_ewe_cache_dirs <- function(guids) {
+  roots <- ls_ewe_cache_roots()
+  if (!length(roots) || !length(guids)) return(character())
+  d <- as.vector(outer(roots, guids, file.path))
+  d[dir.exists(d)]
+}
+
+ls_clear_ewe_cache <- function(guids) {
+  d <- ls_ewe_cache_dirs(guids)
+  unlink(d, recursive = TRUE, force = TRUE)
+  invisible(d)
 }
 
 # Diagnostics after a real run: did Ecospace read this run's structure map, and did anything change?
@@ -1453,23 +1568,24 @@ ls_check_run <- function(S, job, obj) {
     file.copy(log, file.path(job$run_dir, "spatiallog.txt"), overwrite = TRUE)
     log_lines <- readLines(log, warn = FALSE)
     loaded <- unique(sub(".*Loaded data from '(.*)'.*", "\\1", grep("Loaded data from '", log_lines, value = TRUE)))
-    if (any(grepl("Loaded from cache", log_lines, fixed = TRUE))) {
-      # This run used cached layers, not the solver's maps: never score it
+    # Ecospace reports cached layers as "Loaded from cache" even when it filled the cache from the
+    # maps during this run. The run is stale only if a cache entry for this model could not be deleted
+    # beforehand (for example because another program had it open) and Ecospace did not rewrite it.
+    cached <- list.files(ls_ewe_cache_dirs(S$guids), recursive = TRUE, full.names = TRUE)
+    left   <- job$cache_left %||% numeric()
+    stale  <- cached[cached %in% names(left) & as.numeric(file.mtime(cached)) <= left[cached]]
+    if (length(stale)) {
       S$results$kind[S$results$run == job$run] <- "probe"
-      cd <- S$cfg$model$cache_dir %||% ""
-      ls_alert(S, sprintf("%s: Ecospace loaded the habitat maps from its spatial data cache instead of the files the solver wrote, so this run is not scored. %s",
-                          job$run, if (nzchar(cd)) {
-                            sprintf("The folder set as the cache (%s) was emptied before the run, so Ecospace's cache must be somewhere else.", cd)
-                          } else {
-                            "Set 'Ecospace spatial cache folder' on the Start here tab (it shows how to find the folder) and start again."
-                          }), key = "cache")
+      ls_alert(S, sprintf("%s: Ecospace reused cached habitat layers from %s that the solver could not delete (is Ecospace or another program open?), so this run is not scored.",
+                          job$run, dirname(stale[1])), key = "cache")
       # Every later run would read the same cache, so stop rather than produce identical scenarios
       if (job$kind == "baseline_none") {
         S$total_runs <- S$i
-        ls_log(S, "Stopped: the status quo run was served from Ecospace's cache.")
+        ls_log(S, "Stopped: the status quo run read stale cached layers. Close other Ecospace programs and start again.")
       }
       return(invisible())
     }
+    if (length(cached)) ls_log(S, sprintf("%s: Ecospace cached this run's layers afresh (%d file(s)).", job$run, length(cached)))
   } else {
     ls_alert(S, sprintf("%s: Ecospace wrote no spatial log (%s), so the solver cannot confirm which maps it read.", job$run, log),
              key = "no_spatiallog")
