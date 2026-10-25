@@ -172,29 +172,46 @@ ls_find_console <- function(repo_root = NULL) {
 ls_fed_species <- c("greater amberjack", "gag", "red grouper", "red snapper",
                     "gray snapper", "lane snapper", "gray triggerfish", "vermilion snapper")
 
-ls_default_objectives <- function() {
+# Objective library: everything a user can add from the app. The defaults (default = TRUE) are a
+# short list of outcomes to increase; the rest are offered in the app's "Add from list" menu.
+ls_objective_library <- function() {
   B <- "Annual_Average_Biomass"; C <- "Annual_Average_Catch"
-  fed <- paste(ls_fed_species, collapse = ", ")
-  main <- data.frame(
-    name         = c("RS_Biomass", "Tot_Biomass", "Fed_Biomass", "RS_Catch", "Tot_Catch", "Fed_Catch",
-                     "Comm_Catch", "Rec_Catch", "Total_Revenue", "Comm_Revenue", "Biodiversity", "Lionfish_Biomass"),
-    file_pattern = c(B, B, B, C, C, C, C, C, C, C, B, B),
-    target       = c("red snapper adult", NA, fed, "red snapper adult", NA, fed, fed, fed, NA, NA, NA, "lionfish"),
-    type         = c("species", "sum", "species", "species", "sum", "species", "species", "species",
-                     "revenue", "revenue", "biodiversity", "species"),
-    direction    = c(rep("max", 11), "min"),
-    weight       = c(1, 0.5, 1, 2, 0.5, 1, 1, 1, 2, 0, 1, 1),
-    fleet        = c(NA, NA, NA, NA, NA, NA, "commercial", "recreational", NA, "commercial", NA, NA),
-    stringsAsFactors = FALSE
+  fed    <- paste(ls_fed_species, collapse = ", ")
+  others <- paste(setdiff(ls_fed_species, "red snapper"), collapse = ", ")
+  o <- function(name, label, file, target, type, direction = "max", fleet = NA, default = FALSE)
+    data.frame(name = name, label = label, file_pattern = file, target = target, type = type,
+               direction = direction, weight = 1, fleet = fleet, default = default, stringsAsFactors = FALSE)
+  lib <- rbind(
+    o("RS_Biomass",        "Red snapper biomass",                         B, "red snapper adult", "species", default = TRUE),
+    o("RS_Catch",          "Red snapper catch",                           C, "red snapper adult", "species", default = TRUE),
+    o("Reef_Fish_Biomass", "Other managed reef fish biomass",             B, others, "species", default = TRUE),
+    o("Total_Revenue",     "Fishery revenue (catch x dockside price)",    C, NA, "revenue", default = TRUE),
+    o("Reef_Fish_Catch",   "Other managed reef fish catch",               C, others, "species"),
+    o("Fed_Biomass",       "All federally managed reef fish biomass",     B, fed, "species"),
+    o("Fed_Catch",         "All federally managed reef fish catch",       C, fed, "species"),
+    o("Comm_Catch",        "Commercial catch of managed reef fish",       C, fed, "species", fleet = "commercial"),
+    o("Rec_Catch",         "Recreational catch of managed reef fish",     C, fed, "species", fleet = "recreational"),
+    o("Comm_Revenue",      "Commercial fishery revenue",                  C, NA, "revenue", fleet = "commercial"),
+    o("Tot_Biomass",       "Total biomass (all groups)",                  B, NA, "sum"),
+    o("Tot_Catch",         "Total catch (all groups)",                    C, NA, "sum"),
+    o("Biodiversity",      "Biodiversity (Shannon index of biomass)",     B, NA, "biodiversity"),
+    o("Lionfish_Biomass",  "Lionfish biomass (invasive; lower is better)", B, "lionfish", "species", direction = "min")
   )
   slug <- gsub("[^A-Za-z0-9]+", "_", tolower(trimws(ls_fed_species)))
-  per_species <- data.frame(
-    name         = c(rbind(paste0("FedSp_", slug, "_Biomass"), paste0("FedSp_", slug, "_Catch"))),
-    file_pattern = rep(c(B, C), length(slug)),
-    target       = rep(ls_fed_species, each = 2),
-    type = "species", direction = "max", weight = 0, fleet = NA, stringsAsFactors = FALSE
-  )
-  rbind(main, per_species)
+  for (k in seq_along(ls_fed_species)) {
+    sp <- ls_fed_species[k]; lab <- paste0(toupper(substring(sp, 1, 1)), substring(sp, 2))
+    lib <- rbind(lib,
+      o(paste0("FedSp_", slug[k], "_Biomass"), paste(lab, "biomass"), B, sp, "species"),
+      o(paste0("FedSp_", slug[k], "_Catch"),   paste(lab, "catch"),   C, sp, "species"))
+  }
+  lib[!duplicated(lib$name), ]
+}
+
+# Default objectives: a short list of positives (red snapper biomass and catch, the other managed reef
+# fish, fishery revenue). More can be added from ls_objective_library() in the app.
+ls_default_objectives <- function() {
+  lib <- ls_objective_library()
+  lib[lib$default, setdiff(names(lib), c("label", "default"))]
 }
 
 # Economics used by "revenue" objectives and the reporting columns (structure_optimization.R econ_params)
@@ -1234,7 +1251,9 @@ ls_score <- function(df, objectives, area_km2 = 1, econ = ls_default_econ(), roi
     rel <- if (is.finite(b)) { if (b != 0) (v - b) / b else (v - b) } else rep(NA_real_, nrow(df))
     df[[paste0(obj$name, "_vs_status_quo_pct")]] <- 100 * rel
     w <- ls_num(obj$weight, 1)
-    comp <- comp + ifelse(is.na(rel), 0, rel * w * (if (obj$direction == "min") -1 else 1))
+    # Each objective adds at most +/-100% x weight, so one whose status quo is near zero (e.g.
+    # lionfish) cannot swamp the rest; the _vs_status_quo_pct columns keep the full change
+    comp <- comp + ifelse(is.na(rel), 0, pmax(-1, pmin(1, rel)) * w * (if (obj$direction == "min") -1 else 1))
     gain <- if (is.finite(b)) v - b else rep(NA_real_, nrow(df))
     if (obj$type %in% c("species", "sum")) df[[paste0("Net_", obj$name, "_Gain_Lbs")]] <- round(gain * area_km2 * lbs, 2)
     if (obj$type == "revenue") df[[paste0("Net_", obj$name, "_Gain_USD")]] <- round(gain, 2)
