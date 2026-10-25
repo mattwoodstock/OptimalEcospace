@@ -8,8 +8,7 @@ An interactive (Shiny) front end for the OptimalEcospace optimization loop. It f
 2. For real scenarios, install the **Ecospace console** (`EwEClientConsole.exe`, Windows). Without it the app still runs in **test mode**, which uses made-up scores so you can learn the interface.
 3. Download **[OptimalEcospace-LiveSolver.zip](https://github.com/mattwoodstock/OptimalEcospace/releases/download/live-solver/OptimalEcospace-LiveSolver.zip)** (about 1.5 MB) and unzip it, ideally to a short path such as `C:\OptimalEcospace`. It contains only what the Live Solver needs (see *Building the download* below). Cloning the whole repository works too.
 4. Start the app:
-   * **Windows:** double-click `Start Live Solver.bat` in the repository folder.
-   * **RStudio:** open `R/LiveSolver/launch.R` and click **Source**.
+   * **RStudio:** open `Start Live Solver.R` (in the unzipped folder) and click **Source**.
    * **Any R console:** `source("R/LiveSolver/launch.R")` from the repository folder.
 
 The first start installs the R packages it needs (`shiny`, `bslib`, `DT`, `processx`, `terra`, `xml2`, `jsonlite`), which takes a few minutes. The app opens in your web browser; keep the R window open while you use it.
@@ -58,7 +57,7 @@ Structure layers hold the **proportion of each cell that is structure** (0-1), w
 
 `build_package.R` assembles `OptimalEcospace-LiveSolver.zip` with only the files a run needs:
 
-* the app and launcher (`Start Live Solver.bat`, `R/LiveSolver/*.R`)
+* the app and launcher (`Start Live Solver.R`, `R/LiveSolver/*.R`). The download contains no programs or batch files, so browsers have nothing to flag.
 * for each region in `Inputs/`, the model named by `<EWE_MODEL_FILE>` in its command-file template
 * the region's STConfig file, command-file template, and the rasters the solver reads or rewrites: every habitat layer in the STConfig, `basemap.asc`, `exclusions.asc`, `cost_map.asc`, and the pristine copies of the habitat layers in `Inputs/<region>/Initial Base Mapps/` when that folder exists
 

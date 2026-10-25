@@ -23,7 +23,7 @@ pkg_name <- "OptimalEcospace-LiveSolver"
 source(file.path(repo_root, "R/LiveSolver/solver_engine.R"))
 
 # App and launcher ----
-files <- c("Start Live Solver.bat",
+files <- c("Start Live Solver.R",
            file.path("R/LiveSolver", c("app.R", "solver_engine.R", "launch.R", "run_headless.R", "README.md")))
 
 # Per region: the model named in the command template + every map/config a run reads ----

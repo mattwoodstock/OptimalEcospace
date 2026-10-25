@@ -12,4 +12,4 @@ This repository houses the methodology to turn the Ecospace console into an opti
 </p>
 
 ## Live Solver
-`R/LiveSolver` is an interactive app for exploring artificial-structure installation and decommissioning scenarios with Ecospace. You choose a model, adjust the constraints, run any number of scenarios, and compare the results in your web browser. To start it on Windows, double-click `Start Live Solver.bat`, or open `R/LiveSolver/launch.R` in RStudio and click **Source**. See [R/LiveSolver/README.md](R/LiveSolver/README.md) for details.
+`R/LiveSolver` is an interactive app for exploring artificial-structure installation and decommissioning scenarios with Ecospace. You choose a model, adjust the constraints, run any number of scenarios, and compare the results in your web browser. To start it, open `Start Live Solver.R` in RStudio and click **Source**. See [R/LiveSolver/README.md](R/LiveSolver/README.md) for details.
