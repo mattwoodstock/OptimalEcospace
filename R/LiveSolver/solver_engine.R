@@ -385,10 +385,21 @@ ls_load_config <- function(path, repo_root) {
 
 # Problem Construction ----
 
+# Ecospace reads .asc layers by row and column and ignores their coordinates, so a layer with the
+# basemap's rows and columns is taken cell for cell even if its header places it elsewhere (some
+# NGoM maps say yllcorner 29.28, others 30.25). Only a different grid size is resampled.
 ls_read_layer <- function(path, template, method = "near") {
   r <- rast(path)
-  if (!compareGeom(template, r, stopOnError = FALSE)) r <- resample(r, template, method = method)
-  values(r, mat = FALSE)
+  if (nrow(r) == nrow(template) && ncol(r) == ncol(template)) return(values(r, mat = FALSE))
+  values(resample(r, template, method = method), mat = FALSE)
+}
+
+# The basemap the solver uses: the pristine folder's copy when present (as structure_optimization.R)
+ls_basemap_path <- function(inputs_dir, basemap_file = "basemap.asc", pristine_source = "auto") {
+  f <- ls_resolve(basemap_file, inputs_dir)
+  if (is.na(f)) return(f)
+  pd <- ls_pristine_dir(inputs_dir, pristine_source)
+  if (!is.null(pd) && file.exists(file.path(pd, basename(f)))) file.path(pd, basename(f)) else f
 }
 
 ls_resolve <- function(file, inputs_dir) {
@@ -544,9 +555,9 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
     for (f in used$file) file.copy(f, file.path(snapshot_dir, basename(f)), overwrite = TRUE)
   }
 
-  basemap_file <- ls_resolve(L$basemap_file, inputs_dir)
+  basemap_file <- ls_basemap_path(inputs_dir, L$basemap_file, L$pristine_source %||% "auto")
   if (is.na(basemap_file)) stop("Basemap not found: ", L$basemap_file)
-  template <- rast(pristine_file(basemap_file))
+  template <- rast(basemap_file)
   nr <- nrow(template); nc <- ncol(template)
   depth <- values(template, mat = FALSE)
   water <- !is.na(depth) & depth > 0

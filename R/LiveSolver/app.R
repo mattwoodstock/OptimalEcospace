@@ -490,8 +490,8 @@ server <- function(input, output, session) {
   region_defaults <- reactive({
     bf <- input$basemap_file
     if (is.null(bf) || !nzchar(bf)) bf <- "basemap.asc"
-    f <- file.path(model_row()$inputs_dir, bf)
-    req(file.exists(f))
+    f <- ls_basemap_path(model_row()$inputs_dir, bf, input$pristine_source %||% "auto")
+    req(!is.na(f), file.exists(f))
     b <- terra::rast(f)
     d <- terra::values(b, mat = FALSE); d <- d[!is.na(d) & d > 0]
     e <- unname(as.vector(terra::ext(b)))

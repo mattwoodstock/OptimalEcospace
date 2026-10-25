@@ -49,7 +49,8 @@ for (reg in list.dirs(file.path(repo_root, "Inputs"), full.names = FALSE, recurs
                                     defaults$decom$cost_map_file)))
   # Pristine copies of the habitat layers ("Initial Base Mapps"), read before every scenario
   pdir <- ls_pristine_dir(inputs_dir, "auto")
-  if (!is.null(pdir)) maps <- c(maps, file.path(pdir, basename(info$layers$file)))
+  if (!is.null(pdir)) maps <- c(maps, file.path(pdir, c(basename(info$layers$file), defaults$layers$basemap_file,
+                                                        defaults$install$exclusions_file)))
   maps <- maps[file.exists(maps)]
   files <- c(files, model_rel, rel(info$stconfig), rel(info$cmd_template), vapply(maps, rel, ""))
 }
