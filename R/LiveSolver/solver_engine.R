@@ -1406,6 +1406,53 @@ ls_rescore <- function(S, df) {
            cfg$search$roi_objective %||% "RS_Catch", cfg$search$revenue_objective %||% "Total_Revenue")
 }
 
+# Row-bind results whose objective columns differ (objectives added or removed mid-session)
+ls_bind_rows <- function(a, b) {
+  if (is.null(a)) return(b)
+  for (n in setdiff(names(b), names(a))) a[[n]] <- rep(NA, nrow(a))
+  for (n in setdiff(names(a), names(b))) b[[n]] <- rep(NA, nrow(b))
+  rbind(a, b[, names(a), drop = FALSE])
+}
+
+# Re-score a session (also while it runs) with a new objective table: the session then uses exactly
+# these objectives. Objectives it has not computed yet are evaluated for every finished run from the
+# run's saved Ecospace output (or, in test mode, from its layout); removed ones stay in the results
+# file as reported values but no longer count.
+ls_update_objectives <- function(S, objectives, roi_objective = NULL, revenue_objective = NULL) {
+  cfg <- S$cfg
+  objectives <- as.data.frame(objectives, stringsAsFactors = FALSE)
+  df <- S$results
+  new <- objectives[!objectives$name %in% names(df), , drop = FALSE]
+  if (nrow(new) && !is.null(df) && nrow(df)) {
+    vals <- matrix(NA_real_, nrow(df), nrow(new), dimnames = list(NULL, new$name))
+    for (i in seq_len(nrow(df))) {
+      if (!isTRUE(df$finished[i])) next
+      run_dir <- dirname(df$map_dir[i])
+      v <- if (isTRUE(cfg$search$dry_run)) {
+        cand <- S$cands[[df$run[i]]]
+        if (is.null(cand)) NULL else ls_synthetic_objectives(S$P, ls_apply_candidate(S$P, cand), new)
+      } else if (dir.exists(run_dir)) {
+        ls_evaluate_objectives(run_dir, new, cfg$search$eval_last_n, cfg$econ, S$P$total_area_km2)
+      }
+      if (!is.null(v)) vals[i, ] <- vapply(new$name, function(n) ls_num(v[[n]], NA_real_), numeric(1))
+    }
+    for (n in new$name) df[[n]] <- vals[, n]
+  }
+  cfg$objectives <- objectives
+  if (!is.null(roi_objective)) cfg$search$roi_objective <- roi_objective
+  if (!is.null(revenue_objective)) cfg$search$revenue_objective <- revenue_objective
+  S$cfg <- cfg
+  S$P$cfg <- cfg
+  if (!is.null(df)) {
+    S$results <- ls_rescore(S, df)
+    write.csv(S$results, S$results_file, row.names = FALSE)
+    ls_save_config(cfg, file.path(S$session_dir, "solver_config.json"))
+  }
+  ls_log(S, sprintf("Re-scored %d run(s) with: %s", if (is.null(df)) 0L else nrow(df),
+                    paste(sprintf("%s (%s, w=%g)", objectives$name, objectives$direction, objectives$weight), collapse = "; ")))
+  invisible(S)
+}
+
 ls_next_job <- function(S) {
   if (S$i >= S$total_runs) return(NULL)
   S$i <- S$i + 1
@@ -1536,7 +1583,7 @@ ls_finish_job <- function(S, job) {
   row <- cbind(row, as.data.frame(obj, check.names = FALSE))
   write.csv(row, file.path(job$run_dir, "run_summary.csv"), row.names = FALSE)
 
-  S$results <- ls_rescore(S, rbind(ls_strip_scores(S$results), row))
+  S$results <- ls_rescore(S, ls_bind_rows(ls_strip_scores(S$results), row))
   write.csv(S$results, S$results_file, row.names = FALSE)
 
   sc <- S$results$Composite_Score[nrow(S$results)]

@@ -50,7 +50,8 @@ Structure layers hold the **proportion of each cell that is structure** (0-1), w
 
 * **Pause after this run**, **Resume**, **Stop & restore**.
 * **Add iterations** extends a session that is going well.
-* **Re-score** applies edited objective weights and directions to every run so far. The evolutionary search then follows the new ranking.
+* **Re-score** applies the current objective table to every run so far, also while the session is running: edited weights and directions, deleted objectives (no longer scored), and added ones, which are computed for each finished run from its saved Ecospace output. The evolutionary search and later runs then use the new objectives.
+* The score plots show the status quo level (0) as a gray dashed line.
 * The composite score is the weighted sum of each objective's relative change from the status quo (`weight × (value − status quo) / status quo`, with the sign flipped for `min` objectives). Each objective adds at most ±100% × its weight, so one whose status quo is near zero can't swamp the others. The `_vs_status_quo_pct` columns keep the full change. The status quo scores 0. A run is on the *cost frontier* when no other run scores at least as high for the same or lower cost.
 
 ## Building the download

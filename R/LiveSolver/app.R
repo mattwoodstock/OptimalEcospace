@@ -786,16 +786,10 @@ server <- function(input, output, session) {
   observeEvent(input$rescore_btn, {
     S <- rv$S
     req(S, !is.null(S$results))
-    new <- objectives()
-    cur <- S$cfg$objectives
-    hit <- match(cur$name, new$name)
-    cur$weight[!is.na(hit)]    <- new$weight[hit[!is.na(hit)]]
-    cur$direction[!is.na(hit)] <- new$direction[hit[!is.na(hit)]]
-    S$cfg$objectives <- cur
-    S$P$cfg$objectives <- cur
-    S$results <- ls_rescore(S, S$results)
-    write.csv(S$results, S$results_file, row.names = FALSE)
-    ls_log(S, "Re-scored with updated objective weights/directions.")
+    ok <- tryCatch({
+      ls_update_objectives(S, objectives(), input$roi_objective, input$revenue_objective); TRUE
+    }, error = function(e) { showNotification(paste("Re-score failed:", conditionMessage(e)), type = "error"); FALSE })
+    if (ok) showNotification(sprintf("Re-scored %d runs with the current objectives.", nrow(S$results)), type = "message")
     rv$tick <- rv$tick + 1
   })
 
@@ -859,6 +853,7 @@ server <- function(input, output, session) {
     par(mar = c(4, 4, 1, 1))
     cols <- c(probe = "#b5b5b5", baseline_none = "#6b6b6b", random = "#2a78d6", evolutionary = "#eb6834")
     plot(df$iteration, df$Composite_Score, pch = 19, col = cols[df$kind], xlab = "Run", ylab = "Composite score")
+    abline(h = 0, col = "gray50", lty = 2)   # status quo level
     sc <- df$Composite_Score; sc[is.na(sc)] <- -Inf
     lines(df$iteration, cummax(sc), type = "s", col = "#d62728", lwd = 2)
     legend("bottomright", c(names(cols)[names(cols) %in% df$kind], "best so far"),
@@ -871,6 +866,7 @@ server <- function(input, output, session) {
     par(mar = c(4, 4, 1, 1))
     plot(df$total_cost / 1e6, df$Composite_Score, pch = 19, col = ifelse(df$Cost_Frontier %in% TRUE, "#d62728", "#9ecae1"),
          xlab = "Total cost (million USD)", ylab = "Composite score")
+    abline(h = 0, col = "gray50", lty = 2)   # status quo level
     f <- df[df$Cost_Frontier %in% TRUE, ]
     f <- f[order(f$total_cost), ]
     lines(f$total_cost / 1e6, f$Composite_Score, col = "#d62728", type = "s")
