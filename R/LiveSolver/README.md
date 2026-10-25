@@ -1,6 +1,6 @@
 # Live Solver
 
-An interactive (Shiny) front end for the OptimalEcospace optimization loop. You pick an existing Ecospace model in this repository, set the constraints for an artificial-structure **installation**, **decommissioning**, or **mixed** strategy, and the solver runs Ecospace scenario after scenario. Scores, the cost frontier and the best layout update after every run.
+An interactive (Shiny) front end for the OptimalEcospace optimization loop. It follows the same process as `structure_optimization.R` (reef modules, random budgets, natural habitat making room for reef, objectives scored against the status quo), so a non-modeller can run it from a browser. You pick an existing Ecospace model in this repository, set the constraints for an artificial-structure **installation**, **decommissioning**, or **mixed** strategy, and the solver runs Ecospace scenario after scenario. Scores, the cost frontier and the best layout update after every run.
 
 ## Getting started (no R experience needed)
 
@@ -32,13 +32,18 @@ Rscript run_headless.R path/to/config.json
 | Section | Parameters |
 |---|---|
 | **Start here** | location of the Ecospace console (`EwEClientConsole.exe`) |
-| **Model & run** | model, Ecosim/Ecospace scenario index, run length, time steps per year, spin-up on/off and length, threads, per-run timeout, which STConfig layer holds the artificial structures, which natural habitat layers are displaced or restored, basemap, existing-structures map, pristine map source (current Inputs or `Backup_Base_Maps`), extra raw command-file lines (vulnerabilities, dispersal, environmental responses, …) |
+| **Model & run** | model, Ecosim/Ecospace scenario index, run length, time steps per year, spin-up on/off and length, threads (all filled in from the region's command-file template), per-run timeout, which STConfig layer holds the artificial structures, which natural habitat layers make room for reef, basemap, existing-structures map, where the pristine maps come from (`Initial Base Mapps` when present, the current Inputs, or `Backup_Base_Maps`), how existing structure cells are read (fractional maps kept, presence 0/1 maps given one module's cover), extra raw command-file lines (vulnerabilities, dispersal, environmental responses, …) |
 | **Strategy** | install, decommission, or mixed; for mixed, a shared or separate budget |
-| **Installation** | budget; fill the budget or pick a random count; min/max number of new structures; cell coverage per structure; cost from a cost map (× multiplier), from depth (USD/m) or a fixed cost, plus a fixed per-structure cost and optional scaling by coverage; exclusions map; extra allowed-area mask; depth range; lon/lat bounding box; min spacing between new structures; buffer around existing structures; avoid cells rich in chosen natural habitats (threshold); placement pattern (random, clustered around hubs, prefer cheaper cells, prefer deeper cells); how natural habitat under a new structure is reduced (proportionally, subtract as in the legacy script, or unchanged) |
+| **Installation: reef modules** | as in `structure_optimization.R`: each scenario draws a random budget up to the maximum (default $6,000,000) and spends it in drops of up to 100 modules per cell, with a batch discount of up to 30% for a full drop. Module cost (default $2,500), footprint (6 m²), height (3 m), minimum water above the crest (6 m), halo radius (500 m, which grows with neighbouring reef), maximum reef share of a cell, depth cost factor and reference depth, optional connectivity preference. Reef cover in a cell grows as `cap − (cap − cover)·exp(−increment/cap)`. Where modules may go: exclusions map, extra allowed-area mask, depth range, lon/lat box, buffer from existing structures, avoid cells rich in chosen natural habitats. Natural habitat under new reef makes room for it (natural + reef ≤ 1) or is left unchanged |
 | **Decommissioning** | removal budget; min/max removals; min structures retained; full or partial removal fraction; minimum coverage for a structure to be eligible; cost (fixed, depth-based or cost map); depth range; bounding box; selection preference (random, cheapest, costliest, shallowest, deepest); what the freed area becomes (natural habitats proportionally, a single named habitat, or nothing) |
-| **Objectives** | editable table (name, output-file pattern, target group, `species`/`sum`/`biodiversity`, `max`/`min`, weight); average over the last *N* output rows; which objective is used for ROI per dollar |
-| **Search** | random seed; the two baselines (no change, and every eligible cell regardless of budget); random search or evolutionary search (random warm-up, then mutations of the current best run); how maps reach Ecospace |
+| **Objectives** | editable table (name, output-file pattern, target groups, fleet, `species`/`sum`/`biodiversity`/`revenue`, `max`/`min`, weight). The defaults are the script's: red snapper, total and federally managed biomass and catch, commercial and recreational catch, lionfish biomass, total revenue, biodiversity, and reported-only (weight 0) biomass of each federally managed species. Values are averaged over the last *N* years (default 5). Choose which objective gives pounds gained per module and per dollar, and which gives revenue gain and payback |
+| **Economics** | pounds per tonne, dockside price per species ($/lb, default prices from the script), default price for other groups, fleet multipliers |
+| **Search** | random seed; run 1 is always the no-change status quo that every scenario is compared against; random search, or evolutionary search (random warm-up, then a parent from the Pareto front of the weighted objectives loses 10–40% of its reef cells and the freed budget is spent again) |
 | **Next to the Start button** | number of scenarios to run; test mode (no Ecospace, made-up scores) |
+
+Every field has a default and a blank field uses it. Depth limits and the lon/lat box default to the map's depth range and extent. Cells are also excluded where the module would leave less than the minimum clearance above its crest.
+
+Structure layers hold the **proportion of each cell that is structure** (0-1), which is what Ecospace reads. All maps shade structure cells by that proportion. New structures are outlined in orange and decommissioned ones in magenta with a cross, so changes stay visible at any cover. Partial removal leaves the remaining share in the cell.
 
 **Sample a candidate** draws one layout under the current constraints so you can check feasibility before you spend console time. The preview map shows which cells are eligible for installation and which are eligible for decommissioning.
 
@@ -47,7 +52,7 @@ Rscript run_headless.R path/to/config.json
 * **Pause after this run**, **Resume**, **Stop & restore**.
 * **Add iterations** extends a session that is going well.
 * **Re-score** applies edited objective weights and directions to every run so far. The evolutionary search then follows the new ranking.
-* The composite score is the weighted sum of min–max normalised objectives over all finished runs. A run is on the *cost frontier* when no other run scores at least as high for the same or lower cost.
+* The composite score is, as in the script, the weighted sum of each objective's relative change from the status quo (`weight × (value − status quo) / status quo`, with the sign flipped for `min` objectives). The status quo scores 0. A run is on the *cost frontier* when no other run scores at least as high for the same or lower cost.
 
 ## Building the download
 
@@ -55,7 +60,7 @@ Rscript run_headless.R path/to/config.json
 
 * the app and launcher (`Start Live Solver.bat`, `R/LiveSolver/*.R`)
 * for each region in `Inputs/`, the model named by `<EWE_MODEL_FILE>` in its command-file template
-* the region's STConfig file, command-file template, and the rasters the solver reads or rewrites: every habitat layer in the STConfig, `basemap.asc`, `exclusions.asc` and `cost_map.asc`
+* the region's STConfig file, command-file template, and the rasters the solver reads or rewrites: every habitat layer in the STConfig, `basemap.asc`, `exclusions.asc`, `cost_map.asc`, and the pristine copies of the habitat layers in `Inputs/<region>/Initial Base Mapps/` when that folder exists
 
 Sediment source data (`Inputs/dbSeaBed`), model backups, logs, `Backup_Base_Maps` and other working files are left out. Any new region or habitat layer added to an STConfig is picked up automatically.
 
@@ -69,7 +74,7 @@ The **Results** tab shows, for the top scenarios, the percent change of every ou
 
 Each session writes to `Outputs/<region>/LiveSolver_<timestamp>/`:
 
-* `optimization_results.csv`: one row per run, with structures added and removed, costs, objectives, composite score and frontier flag
+* `optimization_results.csv`: one row per run, with the drawn budget, modules and reef cells, average cost per module, modules per cell, contiguity, spatial footprint, removals, costs, every objective and its `_vs_status_quo_pct`, net pounds gained, pounds per module and per dollar, revenue gain and payback, composite score, Pareto and cost-frontier flags
 * `Run_XXXX/`: `Maps/` (every habitat layer used), `candidate.json` (cell indices), `cmd.txt`, console logs and the Ecospace CSVs
 * `Best_Maps/`: the best run's layers
 * `solver_config.json`: the exact configuration. Load it in the app or pass it to `run_headless.R` to reproduce the session.
@@ -77,7 +82,20 @@ Each session writes to `Outputs/<region>/LiveSolver_<timestamp>/`:
 
 ## How maps reach Ecospace
 
-* **Overwrite Inputs** (default, as in `structure_optimization.R`): each run's layers are copied over the files in `Inputs/<region>/`. The solver points the console at a session copy of the STConfig file whose paths lead to those Inputs files, so it works wherever the repository is cloned. Before the first run, the original maps are snapshotted. They are restored when the session finishes, is stopped, or the browser tab closes. If R crashes mid-session, a `.livesolver_lock` file stays in the Inputs folder, and the next session (app or headless) restores the snapshot automatically before it starts.
-* **Per-run STConfig**: the Inputs folder is never touched. Each run gets its own STConfig file pointing at that run's `Maps/` folder.
+Ecospace reads one fixed STConfig file and the map files it lists, so the solver works the same way `structure_optimization.R` does. Every scenario starts from the pristine maps (`Inputs/<region>/Initial Base Mapps/` when present; put your original habitat layers there, under the same file names). Before every run the solver writes the scenario's layers straight over the map files in `Inputs/<region>/` and writes a command file that differs from the template only in the output folder and the model and STConfig paths. A copy of each run's layers is also kept in its `Maps/` folder.
+
+* The region's own STConfig (e.g. `Inputs/NGoM/NGoMSTConfig.xml`) is used, with its file paths repaired in place to point at this folder's `Inputs` maps. This matters because the stored paths can come from another computer.
+* Before the first run, the original maps and STConfig are snapshotted. They are restored when the session finishes, is stopped, or the browser tab closes. If R crashes mid-session, a `.livesolver_lock` file stays in the Inputs folder, and the next session (app or headless) restores the snapshot automatically before it starts.
+* **Ecospace may read a different set of map files.** The console can follow the spatial configuration saved inside the model rather than the one it is given (for example, your original working folder). After the first run, the solver reads Ecospace's spatial log, which lists exactly which map files were loaded. If they are elsewhere, it switches to updating those files (snapshotting them first and restoring them afterwards), tells you where they are, and repeats the status quo run with its own maps. The first run is kept as a `probe` and is not scored.
+* **Ecospace's spatial data cache.** Ecospace can keep converted copies of the habitat layers and reuse them instead of re-reading the map files. Its spatial log then says "Loaded from cache", and every scenario looks like the status quo. Find the cache folder once and enter it under **Ecospace spatial cache folder** on the Start here tab; the solver empties it before every run. The tab shows a PowerShell command, filled in with your structure layer's dataset ID from the STConfig, that finds the folder:
+
+  ```powershell
+  Get-ChildItem $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP, "$env:USERPROFILE\Documents", "C:\Program Files\EcoSpace Console*" -Recurse -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "*08e81913-15bb-41bd-855e-b0e6167305fe*" } | Select-Object FullName
+  ```
+
+  The console and cache locations are remembered on that computer in `LiveSolver_settings.json`. The solver does not search for the cache itself. Drive roots, user folders and folders that contain the model or the Live Solver are refused. If a run still reports "Loaded from cache", it is not scored. If that happens to the status quo run, the session stops and says so.
+* Each copy is verified. If a map can't be overwritten (for example because it is open in another program), the session stops with a message.
+* After each run, the solver keeps Ecospace's spatial log (`<model>_spatiallog.txt`) in the run folder. It warns in the log and in the app if Ecospace did not load the overwritten structure map, or if a scenario that changed structures produced outcomes identical to the status quo.
 
 The engine (`solver_engine.R`) has no Shiny dependency, so other scripts can reuse it (`ls_build_problem`, `ls_generate_candidate`, `ls_apply_candidate`, `ls_evaluate_objectives`, `ls_run_session`, …).

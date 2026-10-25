@@ -28,6 +28,12 @@ library(jsonlite)
 ls_default_console <- "C:/Program Files/EcoSpace Console 1.4.3.1 64-bit/EwEClientConsole.exe"
 ls_lock_name       <- ".livesolver_lock"
 
+# Build stamp written by build_package.R ("development" when running from the repository)
+ls_version <- function() {
+  f <- file.path(Sys.getenv("OPTIMAL_ECOSPACE_ROOT", "../.."), "R/LiveSolver/VERSION")
+  if (file.exists(f)) readLines(f, warn = FALSE)[1] else "development"
+}
+
 # Small helpers ----
 
 # NA / NULL / "" -> no limit
@@ -43,6 +49,8 @@ ls_winpath <- function(p) {
 }
 
 ls_timestamp <- function() format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+ls_pct <- function(x) paste0(trimws(formatC(100 * x, format = "fg", digits = 3)), "%")
 
 ls_usd <- function(x) paste0("$", formatC(round(x), format = "f", digits = 0, big.mark = ","))
 
@@ -113,6 +121,7 @@ ls_read_stconfig <- function(stconfig, inputs_dir) {
     name     = xml_text(xml_find_first(confs, "Name")),
     variable = xml_text(xml_find_first(confs, "Variable")),
     file_xml = xml_text(xml_find_first(confs, "File")),
+    guid     = xml_attr(xml_parent(confs), "GUID"),
     stringsAsFactors = FALSE
   )
   # STConfig stores absolute Windows paths; resolve by file name inside Inputs/<region>
@@ -157,16 +166,87 @@ ls_find_console <- function(repo_root = NULL) {
 
 # Default Configuration ----
 
+# Objectives follow structure_optimization.R. Targets may list several groups separated by commas
+# (columns matching any of them are summed); fleet restricts catch/revenue columns to one fleet.
+# Weight-0 objectives are reported but do not change the composite score or the Pareto front.
+ls_fed_species <- c("greater amberjack", "gag", "red grouper", "red snapper",
+                    "gray snapper", "lane snapper", "gray triggerfish", "vermilion snapper")
+
 ls_default_objectives <- function() {
-  data.frame(
-    name         = c("RS_Biomass", "Tot_Biomass", "RS_Catch", "Tot_Catch", "Biodiversity", "Lionfish_Biomass"),
-    file_pattern = c("Annual_Average_Biomass", "Annual_Average_Biomass", "Annual_Average_Catch",
-                     "Annual_Average_Catch", "Annual_Average_Biomass", "Annual_Average_Biomass"),
-    target       = c("red snapper adult", NA, "red snapper adult", NA, NA, "lionfish"),
-    type         = c("species", "sum", "species", "sum", "biodiversity", "species"),
-    direction    = c("max", "max", "max", "max", "max", "min"),
-    weight       = c(1.0, 0.5, 2.0, 0.5, 1.0, 1.0),
+  B <- "Annual_Average_Biomass"; C <- "Annual_Average_Catch"
+  fed <- paste(ls_fed_species, collapse = ", ")
+  main <- data.frame(
+    name         = c("RS_Biomass", "Tot_Biomass", "Fed_Biomass", "RS_Catch", "Tot_Catch", "Fed_Catch",
+                     "Comm_Catch", "Rec_Catch", "Total_Revenue", "Comm_Revenue", "Biodiversity", "Lionfish_Biomass"),
+    file_pattern = c(B, B, B, C, C, C, C, C, C, C, B, B),
+    target       = c("red snapper adult", NA, fed, "red snapper adult", NA, fed, fed, fed, NA, NA, NA, "lionfish"),
+    type         = c("species", "sum", "species", "species", "sum", "species", "species", "species",
+                     "revenue", "revenue", "biodiversity", "species"),
+    direction    = c(rep("max", 11), "min"),
+    weight       = c(1, 0.5, 1, 2, 0.5, 1, 1, 1, 2, 0, 1, 1),
+    fleet        = c(NA, NA, NA, NA, NA, NA, "commercial", "recreational", NA, "commercial", NA, NA),
     stringsAsFactors = FALSE
+  )
+  slug <- gsub("[^A-Za-z0-9]+", "_", tolower(trimws(ls_fed_species)))
+  per_species <- data.frame(
+    name         = c(rbind(paste0("FedSp_", slug, "_Biomass"), paste0("FedSp_", slug, "_Catch"))),
+    file_pattern = rep(c(B, C), length(slug)),
+    target       = rep(ls_fed_species, each = 2),
+    type = "species", direction = "max", weight = 0, fleet = NA, stringsAsFactors = FALSE
+  )
+  rbind(main, per_species)
+}
+
+# Economics used by "revenue" objectives and the reporting columns (structure_optimization.R econ_params)
+ls_default_econ <- function() {
+  list(
+    lbs_per_mt    = 2204.62,
+    default_price = 1.00,   # $/lb for groups without a listed price
+    fleets = data.frame(fleet = c("commercial", "recreational", "lionfish"), multiplier = c(1, 1, 1),
+                        stringsAsFactors = FALSE),
+    prices = data.frame(
+      species = c("greater amberjack", "gag", "red grouper", "gray snapper", "lane snapper",
+                  "red snapper", "vermilion snapper", "gray triggerfish"),
+      price   = c(1.38, 4.69, 3.64, 2.77, 2.62, 4.21, 2.81, 2.29),
+      stringsAsFactors = FALSE)
+  )
+}
+
+# Machine-specific settings (console and cache locations) remembered between sessions
+ls_settings_file <- function(repo_root) file.path(repo_root, "LiveSolver_settings.json")
+
+ls_read_settings <- function(repo_root) {
+  f <- ls_settings_file(repo_root)
+  if (!file.exists(f)) return(list())
+  tryCatch(fromJSON(f), error = function(e) list())
+}
+
+ls_save_settings <- function(repo_root, cfg) {
+  tryCatch(write_json(list(console_path = cfg$model$console_path, cache_dir = cfg$model$cache_dir %||% ""),
+                      ls_settings_file(repo_root), auto_unbox = TRUE, pretty = TRUE),
+           error = function(e) NULL)
+}
+
+# Values in the command-file template, by tag (e.g. "<N_ECOSPACE_YEARS>" -> "30")
+ls_read_cmd_tags <- function(template) {
+  if (is.null(template) || is.na(template) || !file.exists(template)) return(character())
+  lines <- readLines(template, warn = FALSE)
+  hit <- grep("^\\s*<[A-Z_]+>\\s*,", lines, value = TRUE)
+  setNames(trimws(sub("^\\s*<[A-Z_]+>\\s*,\\s*([^,]*).*$", "\\1", hit)), sub("^\\s*(<[A-Z_]+>).*$", "\\1", hit))
+}
+
+# Run settings shown in the app, read from the region's command-file template
+ls_template_run_settings <- function(template) {
+  t <- ls_read_cmd_tags(template)
+  n <- function(tag, d) { v <- suppressWarnings(as.numeric(t[tag])); if (length(v) && !is.na(v)) v else d }
+  list(
+    ecosim_scenario   = n("<ECOSIM_SCENARIO_INDEX>", 1),
+    ecospace_scenario = n("<ECOSPACE_SCENARIO_INDEX>", 1),
+    n_years           = n("<N_ECOSPACE_YEARS>", 30),
+    use_spinup        = !identical(tolower(unname(t["<ECOSPACE_USE_SPINUP>"])), "false"),
+    spinup_years      = n("<ECOSPACE_SPINUP_LENGTH>", 5),
+    timesteps_year    = n("<N_ECOSPACE_TIMESTEPS_YEAR>", 12),
+    n_threads         = n("<N_BIOMASS_THREADS>", 15)
   )
 }
 
@@ -179,68 +259,68 @@ ls_default_config <- function(repo_root) {
     hit <- grep("struct|reef", lyr$name, ignore.case = TRUE, value = TRUE)
     if (length(hit)) hit[1] else lyr$name[1]
   } else NA_character_
-  console <- ls_find_console(repo_root)
+  saved   <- ls_read_settings(repo_root)
+  console <- if (!is.null(saved$console_path) && file.exists(saved$console_path)) saved$console_path else ls_find_console(repo_root)
+  run     <- ls_template_run_settings(info$cmd_template)
 
   list(
-    model = list(
+    model = c(list(
       region            = if (!is.null(m)) m$region else NA,
       model_file        = if (!is.null(m)) m$model_file else NA,
       inputs_dir        = if (!is.null(m)) m$inputs_dir else NA,
       stconfig          = if (!is.null(info)) info$stconfig else NA,
       cmd_template      = if (!is.null(info)) info$cmd_template else NA,
-      console_path      = console,
-      ecosim_scenario   = 1,
-      ecospace_scenario = 1,
-      n_years           = 30,
-      use_spinup        = TRUE,
-      spinup_years      = 5,
-      timesteps_year    = 12,
-      n_threads         = 15,
+      console_path      = console),
+      run,              # scenario indices, years, spin-up, time steps, threads (template values)
+      list(
       timeout_sec       = 1800,
+      cache_dir         = saved$cache_dir %||% "",  # Ecospace's spatial data cache folder, emptied before every run
       extra_tags        = ""      # raw command-file lines appended verbatim (e.g. vulnerabilities)
-    ),
+    )),
     layers = list(
       structure_layer   = struct_layer,
       existing_file     = "",    # "" = use the pristine structure layer as existing structures
       natural_habitats  = if (!is.null(lyr)) setdiff(lyr$name, struct_layer) else character(),
       basemap_file      = "basemap.asc",
-      pristine_source   = "inputs" # "inputs" (current Inputs files) or "backup" (Backup_Base_Maps)
+      pristine_source   = "auto",  # auto: Inputs/<region>/Initial Base Mapps when present, else Inputs;
+                                   # inputs: current Inputs files; backup: Backup_Base_Maps
+      existing_cover    = "auto"   # auto: keep fractional maps, give presence (0/1) maps one module's cover;
+                                   # as_mapped: keep values; one_module: one module's cover per structure cell
     ),
     strategy = list(
       type          = "install",  # install | decommission | mixed
       shared_budget = FALSE        # mixed only: decommissioning spends from the installation budget
     ),
+    # Reef modules (structure_optimization.R reef_params): standard prefab concrete modules
     install = list(
-      budget                = 500000,
-      fill_budget           = TRUE,   # TRUE: keep adding until budget/max reached; FALSE: random count in [min_n, max_n]
-      min_n                 = 0,
-      max_n                 = NA,
-      coverage_fraction     = 1.0,
-      cost_source           = "map",  # map | depth | fixed
-      cost_map_file         = "cost_map.asc",
-      cost_multiplier       = 1,
-      fixed_cost            = 0,      # per structure, added to every cost source
-      depth_cost_rate       = 1000,   # USD per metre of depth (cost_source = "depth")
-      scale_cost_by_coverage = FALSE,
+      budget                = 6000000, # each scenario draws a random budget up to this (USD)
+      unit_cost             = 2500,    # deployed cost per module (USD)
+      depth_cost_factor     = 0,       # > 0 makes deeper deployment cost more per module
+      ref_depth_m           = 30,      # reference depth for the depth cost factor
+      unit_footprint_m2     = 6,       # module base area
+      unit_height_m         = 3,       # module vertical relief
+      min_clearance_m       = 6,       # water required above the crest
+      halo_base_m           = 500,     # radius of a module's ecological halo, grows with reef neighbours
+      max_reef_fraction     = 1,       # cap on the share of a cell that is reef
+      max_modules_per_drop  = 100,     # most modules stacked in a cell in one drop
+      max_batch_discount    = 0.30,    # cost saving per module for a full drop
+      enforce_connectivity  = FALSE,   # favour cells next to existing modules
+      connectivity_bonus    = 10,
       depth_min             = NA,
       depth_max             = NA,
       use_exclusions        = TRUE,
       exclusions_file       = "exclusions.asc",
-      extra_mask_file       = "",     # optional .asc; cells > 0 are allowed
+      extra_mask_file       = "",      # optional .asc; cells > 0 are allowed
       xmin = NA, xmax = NA, ymin = NA, ymax = NA,
-      min_spacing           = 0,      # cells between new structures (Chebyshev)
-      buffer_existing       = 0,      # cells kept clear around existing structures
+      buffer_existing       = 0,       # cells kept clear around existing structures
       avoid_habitats        = character(),
-      avoid_threshold       = 0.5,    # skip cells where avoided habitats sum above this
-      placement             = "random", # random | clustered | cost_weighted | depth_weighted
-      n_clusters            = 3,
-      cluster_radius        = 3,
-      displacement          = "proportional" # proportional | subtract | none
+      avoid_threshold       = 0.5,     # skip cells where avoided habitats sum above this
+      displacement          = "proportional" # proportional (natural habitat makes room for reef) | none
     ),
     decom = list(
-      budget            = NA,
-      min_n             = 0,
-      max_n             = NA,
+      budget            = 5000000,
+      min_n             = 1,
+      max_n             = 50,
       min_retained      = 0,
       eligible_threshold = 0,          # existing structure value must exceed this
       removal_fraction  = 1.0,         # 1 = full removal, < 1 = partial (e.g. toppling)
@@ -257,17 +337,18 @@ ls_default_config <- function(repo_root) {
     ),
     search = list(
       iterations        = 100,
-      algorithm         = "random",   # random | evolutionary
-      warmup            = 20,
-      mutation_rate     = 0.15,
-      include_baselines = TRUE,
+      algorithm         = "random",   # random | evolutionary (mutates runs on the Pareto front)
+      warmup            = 200,        # random runs before evolutionary mutation starts
+      mutation_min      = 0.1,        # share of a parent's reef cells removed when mutating
+      mutation_max      = 0.4,
       seed              = NA,
-      map_mode          = "overwrite", # overwrite | isolated
       dry_run           = !file.exists(console),
-      eval_last_n       = 1,           # average objectives over the last N output rows
+      eval_last_n       = 5,          # objectives are means over the last N years
       roi_objective     = "RS_Catch",
+      revenue_objective = "Total_Revenue",
       max_retries       = 50
     ),
+    econ = ls_default_econ(),
     objectives = ls_default_objectives()
   )
 }
@@ -280,7 +361,7 @@ ls_save_config <- function(cfg, path) {
 ls_load_config <- function(path, repo_root) {
   raw  <- fromJSON(path, simplifyVector = TRUE)
   base <- ls_default_config(repo_root)
-  for (sec in setdiff(names(base), "objectives")) {
+  for (sec in setdiff(names(base), c("objectives", "econ"))) {
     if (!is.null(raw[[sec]])) {
       for (k in names(raw[[sec]])) {
         v <- raw[[sec]][[k]]
@@ -288,7 +369,15 @@ ls_load_config <- function(path, repo_root) {
       }
     }
   }
-  if (!is.null(raw$objectives)) base$objectives <- as.data.frame(raw$objectives, stringsAsFactors = FALSE)
+  if (!is.null(raw$objectives)) {
+    o <- as.data.frame(raw$objectives, stringsAsFactors = FALSE)
+    if (is.null(o$fleet)) o$fleet <- NA_character_
+    base$objectives <- o
+  }
+  if (!is.null(raw$econ)) {
+    for (k in c("lbs_per_mt", "default_price")) if (!is.null(raw$econ[[k]])) base$econ[[k]] <- raw$econ[[k]]
+    for (k in c("fleets", "prices")) if (!is.null(raw$econ[[k]])) base$econ[[k]] <- as.data.frame(raw$econ[[k]], stringsAsFactors = FALSE)
+  }
   base$layers$natural_habitats <- as.character(unlist(base$layers$natural_habitats))
   base$install$avoid_habitats  <- as.character(unlist(base$install$avoid_habitats))
   base
@@ -349,7 +438,7 @@ ls_recover_inputs <- function(inputs_dir) {
   info <- tryCatch(fromJSON(lock), error = function(e) NULL)
   if (!is.null(info) && dir.exists(info$snapshot_dir)) {
     for (i in seq_along(info$files)) {
-      src <- file.path(info$snapshot_dir, basename(info$files[i]))
+      src <- if (!is.null(info$sources)) info$sources[i] else file.path(info$snapshot_dir, basename(info$files[i]))
       if (file.exists(src)) file.copy(src, info$files[i], overwrite = TRUE)
     }
     message("Recovered pristine Inputs maps from interrupted session: ", info$snapshot_dir)
@@ -358,63 +447,153 @@ ls_recover_inputs <- function(inputs_dir) {
   TRUE
 }
 
+# The script's pristine map folder (Inputs/<region>/Initial Base Mapps) or Backup_Base_Maps
+ls_pristine_dir <- function(inputs_dir, source = "auto") {
+  if (identical(source, "inputs")) return(NULL)
+  if (identical(source, "backup")) {
+    d <- file.path(inputs_dir, "Backup_Base_Maps")
+    return(if (dir.exists(d)) d else NULL)
+  }
+  d <- list.dirs(inputs_dir, recursive = FALSE)
+  d <- d[grepl("^initial base map", basename(d), ignore.case = TRUE)]
+  if (length(d)) d[1] else NULL
+}
+
+# 8-neighbour (Moore) cells of every cell
+ls_neighbor_list <- function(nr, nc) {
+  lapply(seq_len(nr * nc), function(i) {
+    r <- (i - 1) %/% nc; c <- (i - 1) %% nc
+    rr <- r + c(-1, -1, -1, 0, 0, 1, 1, 1); cc <- c + c(-1, 0, 1, -1, 1, -1, 0, 1)
+    ok <- rr >= 0 & rr < nr & cc >= 0 & cc < nc
+    rr[ok] * nc + cc[ok] + 1
+  })
+}
+
+# Reef module model (structure_optimization.R) ----
+
+ls_usable_relief <- function(depth_m, I) {
+  clr      <- ls_num(I$min_clearance_m, 6)
+  feasible <- !is.na(depth_m) & depth_m > clr
+  usable   <- pmin(ls_num(I$unit_height_m, 3), pmax(0, depth_m - clr))
+  usable[!feasible] <- 0
+  list(usable_height_m = usable, relative_relief = ifelse(!is.na(depth_m) & depth_m > 0, usable / depth_m, 0),
+       feasible = feasible)
+}
+
+ls_unit_cost <- function(depth_m, I) {
+  ls_num(I$unit_cost, 2500) * (1 + ls_num(I$depth_cost_factor, 0) * (depth_m / ls_num(I$ref_depth_m, 30)))
+}
+
+# Per-cell metrics for n modules: the halo grows with the number of reef neighbours, and
+# unit_fraction is the share of the cell one module's footprint + halo covers
+ls_reef_metrics <- function(depth_m, n_units, cell_area_m2, cell_idx, reef_mask, neighbors, I) {
+  k <- length(depth_m)
+  n_units <- rep_len(n_units, k); cell_area_m2 <- rep_len(cell_area_m2, k); cell_idx <- rep_len(cell_idx, k)
+  rel <- ls_usable_relief(depth_m, I)
+  n_units[!rel$feasible] <- 0
+  r0 <- sqrt(ls_num(I$unit_footprint_m2, 6) / pi)
+  n_contig <- vapply(cell_idx, function(i) sum(reef_mask[neighbors[[i]]] > 0, na.rm = TRUE), numeric(1))
+  halo_R   <- ifelse(rel$feasible, ls_num(I$halo_base_m, 500) * (1 + n_contig), 0)
+  unit_fraction <- pi * (r0 + halo_R)^2 / cell_area_m2
+  unit_fraction[!rel$feasible] <- 0
+  data.frame(n_units = n_units, usable_height_m = rel$usable_height_m, relative_relief = rel$relative_relief,
+             halo_radius_m = halo_R, n_contig = n_contig,
+             footprint_frac = n_units * ls_num(I$unit_footprint_m2, 6) / cell_area_m2,
+             unit_fraction = unit_fraction)
+}
+
+# Cost of deploying `module_counts` per cell as barge drops of up to max_drop modules; fuller drops
+# get up to max_disc off per module
+ls_deployment_cost <- function(module_counts, unit_costs, max_drop, max_disc) {
+  full <- floor(module_counts / max_drop)
+  rem  <- module_counts %% max_drop
+  disc_rem <- max_disc * ((rem - 1) / pmax(1, max_drop - 1))
+  disc_rem[rem <= 0] <- 0
+  full * (max_drop * unit_costs * (1 - max_disc)) + rem * unit_costs * (1 - disc_rem)
+}
+
+# Coverage after adding modules: approaches the cap asymptotically (Poisson overlap)
+ls_poisson_cover <- function(current, increment, cap) cap - (cap - pmin(cap, current)) * exp(-increment / cap)
+
 # Everything that stays fixed for a whole session
 # recover = FALSE for previews: never touch the Inputs folder while a session may be running
 ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
-  M <- cfg$model; L <- cfg$layers
+  M <- cfg$model; L <- cfg$layers; I <- cfg$install
   inputs_dir <- M$inputs_dir
   if (is.na(inputs_dir) || !dir.exists(inputs_dir)) stop("Inputs directory not found: ", inputs_dir)
   recovered <- recover && ls_recover_inputs(inputs_dir)
 
   layers <- ls_read_stconfig(M$stconfig, inputs_dir)
   if (!L$structure_layer %in% layers$name) stop("Structure layer '", L$structure_layer, "' is not in the STConfig file.")
-  natural <- intersect(L$natural_habitats, layers$name)
-  natural <- setdiff(natural, L$structure_layer)
+  natural <- setdiff(intersect(L$natural_habitats, layers$name), L$structure_layer)
   used    <- layers[layers$name %in% c(L$structure_layer, natural), ]
   missing <- used$name[!used$exists]
   if (length(missing)) stop("Layer file(s) missing in Inputs: ", paste(missing, collapse = ", "))
 
-  basemap_file <- ls_resolve(L$basemap_file, inputs_dir)
-  if (is.na(basemap_file)) stop("Basemap not found: ", L$basemap_file)
-  template <- rast(basemap_file)
-  nr <- nrow(template); nc <- ncol(template)
-  depth <- values(template, mat = FALSE)
-  water <- !is.na(depth) & depth > 0
-  xy    <- xyFromCell(template, seq_len(ncell(template)))
-
-  # Pristine source: current Inputs files or the legacy Backup_Base_Maps folder
+  # Pristine maps: the script's "Initial Base Mapps" folder when present; the active Inputs maps are
+  # snapshotted separately so they can be put back exactly as they were
+  pristine_dir  <- ls_pristine_dir(inputs_dir, L$pristine_source %||% "auto")
   pristine_file <- function(f) {
-    if (identical(L$pristine_source, "backup")) {
-      b <- file.path(inputs_dir, "Backup_Base_Maps", basename(f))
-      if (file.exists(b)) return(b)
-    }
+    if (!is.null(pristine_dir)) { p <- file.path(pristine_dir, basename(f)); if (file.exists(p)) return(p) }
     f
   }
   snapshot_dir <- NULL
   if (!is.null(session_dir)) {
     snapshot_dir <- file.path(session_dir, "_pristine")
     dir.create(snapshot_dir, recursive = TRUE, showWarnings = FALSE)
-    for (f in used$file) file.copy(pristine_file(f), file.path(snapshot_dir, basename(f)), overwrite = TRUE)
+    for (f in used$file) file.copy(f, file.path(snapshot_dir, basename(f)), overwrite = TRUE)
   }
-  src <- function(f) if (!is.null(snapshot_dir)) file.path(snapshot_dir, basename(f)) else pristine_file(f)
+
+  basemap_file <- ls_resolve(L$basemap_file, inputs_dir)
+  if (is.na(basemap_file)) stop("Basemap not found: ", L$basemap_file)
+  template <- rast(pristine_file(basemap_file))
+  nr <- nrow(template); nc <- ncol(template)
+  depth <- values(template, mat = FALSE)
+  water <- !is.na(depth) & depth > 0
+  xy    <- xyFromCell(template, seq_len(ncell(template)))
+  cell_area_m2 <- values(cellSize(template, unit = "m"), mat = FALSE)
+  neighbors <- ls_neighbor_list(nr, nc)
 
   struct_file <- used$file[used$name == L$structure_layer]
-  struct0 <- ls_read_layer(src(struct_file), template)
+  struct0 <- ls_read_layer(pristine_file(struct_file), template)
   struct0[is.na(struct0)] <- 0
-  hab0 <- setNames(lapply(natural, function(h) ls_read_layer(src(used$file[used$name == h]), template, "bilinear")), natural)
+  raw_hab <- setNames(lapply(natural, function(h) ls_read_layer(pristine_file(used$file[used$name == h]), template, "bilinear")), natural)
 
   existing_f <- ls_resolve(L$existing_file, inputs_dir)
   existing <- if (!is.na(existing_f)) ls_read_layer(existing_f, template) else struct0
   existing[is.na(existing)] <- 0
 
+  # Existing reef cover: presence maps (all 0/1) get one module's coverage per structure cell
+  cover_mode <- L$existing_cover %||% "auto"
+  fractional <- any(struct0 > 0 & struct0 < 1)
+  if (cover_mode == "one_module" || (cover_mode == "auto" && !fractional)) {
+    has <- which(struct0 > 0)
+    if (length(has)) {
+      # Base halo only: a presence map says nothing about how many structures share a cell
+      uf <- ls_reef_metrics(depth[has], 1, cell_area_m2[has], has, rep(FALSE, length(struct0)), neighbors, I)$unit_fraction
+      if (any(uf > 0)) uf[uf <= 0] <- stats::median(uf[uf > 0])
+      struct0[has] <- pmin(ls_num(I$max_reef_fraction, 1), uf)
+    }
+  }
+
+  # Natural habitats are rescaled to the room the reef leaves in each cell (natural + reef <= 1)
+  nat_sum <- if (length(raw_hab)) Reduce(`+`, raw_hab) else rep(NA_real_, length(depth))
+  room    <- pmin(1, pmax(0, 1 - struct0))
+  has_nat <- !is.na(nat_sum) & nat_sum > 0
+  scale   <- rep(0, length(depth)); scale[has_nat] <- room[has_nat] / nat_sum[has_nat]
+  hab0    <- lapply(raw_hab, function(v) v * scale)
+  edge    <- !has_nat & struct0 > 0 & "sand" %in% names(hab0)
+  if (any(edge)) hab0[["sand"]][edge] <- room[edge]
+
   # Installation feasibility ----
-  I <- cfg$install
-  inst_ok <- water & existing == 0 & struct0 == 0
+  rel <- ls_usable_relief(depth, I)
+  inst_ok <- !is.na(depth) & rel$feasible
   if (isTRUE(I$use_exclusions)) {
     ef <- ls_resolve(I$exclusions_file, inputs_dir)
     if (is.na(ef)) stop("Exclusions map not found: ", I$exclusions_file)
-    ex <- ls_read_layer(ef, template)
-    inst_ok <- inst_ok & !is.na(ex) & ex > 0
+    ex <- ls_read_layer(pristine_file(ef), template)
+    ex[is.na(ex)] <- 0
+    inst_ok <- inst_ok & ex > 0.5
   }
   mf <- ls_resolve(I$extra_mask_file, inputs_dir)
   if (!is.na(mf)) {
@@ -427,11 +606,16 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
   }
   avoid <- intersect(I$avoid_habitats, natural)
   if (length(avoid)) {
-    hard <- Reduce(`+`, lapply(hab0[avoid], function(v) { v[is.na(v)] <- 0; v }))
+    hard <- Reduce(`+`, lapply(raw_hab[avoid], function(v) { v[is.na(v)] <- 0; v }))
     inst_ok <- inst_ok & hard <= ls_num(I$avoid_threshold, 1)
   }
-  inst_cost <- ls_cost_vector(I, depth, inputs_dir, template)
-  if (isTRUE(I$scale_cost_by_coverage)) inst_cost <- inst_cost * ls_num(I$coverage_fraction, 1)
+  unit_cost <- ls_unit_cost(depth, I)
+  unit_cost[!rel$feasible | is.na(unit_cost)] <- Inf
+  valid <- which(inst_ok)
+  cap_increment <- numeric(length(depth))
+  if (length(valid)) {
+    cap_increment[valid] <- ls_reef_metrics(depth[valid], 1, cell_area_m2[valid], valid, struct0 > 0, neighbors, I)$unit_fraction
+  }
 
   # Decommissioning feasibility ----
   D <- cfg$decom
@@ -442,33 +626,40 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
   type <- cfg$strategy$type
   P <- list(
     cfg = cfg, session_dir = session_dir, snapshot_dir = snapshot_dir, recovered = recovered,
+    pristine_dir = pristine_dir,
     template = template, nr = nr, nc = nc, depth = depth, water = water, xy = xy,
+    cell_area_m2 = cell_area_m2, neighbors = neighbors,
+    total_area_km2 = sum(cell_area_m2[!is.na(depth)], na.rm = TRUE) / 1e6,
     layers = used, struct_file = struct_file, natural = natural,
     struct0 = struct0, hab0 = hab0, existing = existing,
-    install_valid  = if (type %in% c("install", "mixed")) which(inst_ok) else integer(0),
+    install_valid  = if (type %in% c("install", "mixed")) valid else integer(0),
     decom_eligible = if (type %in% c("decommission", "mixed")) which(dec_ok) else integer(0),
-    install_cost = inst_cost, decom_cost = dec_cost
+    unit_cost = unit_cost, cap_increment = cap_increment, decom_cost = dec_cost
   )
   P$summary <- ls_problem_summary(P)
   P
 }
 
 ls_problem_summary <- function(P) {
-  cfg <- P$cfg
-  ic <- P$install_cost[P$install_valid]
+  I  <- P$cfg$install
+  uc <- P$unit_cost[P$install_valid]
+  uf <- P$cap_increment[P$install_valid]
   dc <- P$decom_cost[P$decom_eligible]
+  rng <- function(x, f) if (length(x)) { r <- range(x); if (diff(r) < 1e-9 * max(1, abs(r[1]))) f(r[1]) else paste(f(r[1]), "-", f(r[2])) } else "-"
   data.frame(
-    item = c("Grid (rows x cols)", "Water cells", "Existing structure cells",
-             "Cells eligible for installation", "Installation cost range",
-             "Max installs within budget (cheapest-first)",
-             "Structures eligible for decommissioning", "Removal cost range"),
+    item = c("Grid (rows x cols)", "Water cells", "Pristine maps", "Existing structure cells",
+             "Existing structure cover (min - max of cell)", "Cells eligible for modules",
+             "Cost per module", "Cell cover from one module", "Budget per scenario",
+             "Structures eligible for decommissioning", "Removal cost"),
     value = c(
-      sprintf("%d x %d", P$nr, P$nc), sum(P$water), sum(P$existing > 0),
+      sprintf("%d x %d", P$nr, P$nc), sum(P$water),
+      if (is.null(P$pristine_dir)) "Inputs folder" else basename(P$pristine_dir),
+      sum(P$struct0 > 0),
+      if (any(P$struct0 > 0)) paste(ls_pct(min(P$struct0[P$struct0 > 0])), "-", ls_pct(max(P$struct0))) else "-",
       length(P$install_valid),
-      if (length(ic)) paste(ls_usd(min(ic)), "-", ls_usd(max(ic))) else "-",
-      if (length(ic)) sum(cumsum(sort(ic)) <= ls_limit(cfg$install$budget)) else 0,
-      length(P$decom_eligible),
-      if (length(dc)) paste(ls_usd(min(dc)), "-", ls_usd(max(dc))) else "-"
+      rng(uc, ls_usd), rng(pmin(1, uf), ls_pct),
+      paste("random, up to", ls_usd(ls_num(I$budget, 0))),
+      length(P$decom_eligible), rng(dc, ls_usd)
     ),
     stringsAsFactors = FALSE
   )
@@ -476,53 +667,58 @@ ls_problem_summary <- function(P) {
 
 # Candidate Generation ----
 
-ls_install_order <- function(P, pool) {
-  I <- P$cfg$install
-  switch(I$placement,
-    cost_weighted  = ls_shuffle(pool, 1 / pmax(P$install_cost[pool], 1)),
-    depth_weighted = ls_shuffle(pool, P$depth[pool]),
-    clustered = {
-      k <- max(1, min(length(pool), round(ls_num(I$n_clusters, 1))))
-      centers <- ls_shuffle(pool)[seq_len(k)]
-      near <- ls_within(centers, max(0, round(ls_num(I$cluster_radius, 0))), P$nr, P$nc)
-      ls_shuffle(pool[near[pool]])
-    },
-    ls_shuffle(pool)
-  )
-}
+ls_affordable <- function(cost, budget) sum(cumsum(sort(cost)) <= budget)
 
-# Greedy fill: walk `order`, keep cells that respect budget and spacing
-ls_greedy <- function(P, order, cost, budget, target, spacing) {
-  blocked <- logical(P$nr * P$nc)
-  chosen  <- integer(0)
-  spent   <- 0
-  min_c   <- if (length(order)) min(cost[order]) else 0
-  for (i in order) {
-    if (length(chosen) >= target || spent + min_c > budget) break
-    if (blocked[i] || spent + cost[i] > budget) next
-    chosen <- c(chosen, i)
-    spent  <- spent + cost[i]
-    if (spacing > 0) blocked[ls_neighbors(i, spacing, P$nr, P$nc)] <- TRUE else blocked[i] <- TRUE
-  }
-  list(cells = chosen, cost = spent)
-}
-
-ls_gen_install <- function(P, budget, keep = integer(0), target = NULL, ignore_budget = FALSE) {
+# Modules allocated as random batch drops until a randomly drawn budget is spent
+# (structure_optimization.R batch-stacking loop). `initial` = modules kept from a parent run.
+ls_gen_modules <- function(P, budget_limit, initial = NULL) {
   I <- P$cfg$install
-  pool <- P$install_valid
-  if (!length(pool)) return(list(cells = integer(0), cost = 0))
-  max_n <- min(length(pool), ls_limit(I$max_n))
-  min_n <- ls_num(I$min_n, 0)
-  if (is.null(target)) {
-    target <- if (isTRUE(I$fill_budget) || ignore_budget) max_n else ls_sample_between(min_n, max_n)
+  n <- length(P$depth)
+  valid <- P$install_valid
+  none  <- list(cells = integer(0), n = numeric(0), cost = 0, budget = 0)
+  if (!length(valid) || !is.finite(budget_limit) || budget_limit <= 0) return(none)
+  cap       <- ls_num(I$max_reef_fraction, 1)
+  max_drop  <- max(1, round(ls_num(I$max_modules_per_drop, 100)))
+  max_disc  <- ls_num(I$max_batch_discount, 0.3)
+  bonus     <- ls_num(I$connectivity_bonus, 10)
+  connect   <- isTRUE(I$enforce_connectivity)
+  uc        <- P$unit_cost
+
+  added <- numeric(n)
+  capacity <- P$struct0
+  spent <- 0
+  if (!is.null(initial) && length(initial$cells)) {
+    added[initial$cells] <- initial$n
+    spent <- sum(ls_deployment_cost(added[valid], uc[valid], max_drop, max_disc), na.rm = TRUE)
+    for (c in initial$cells) capacity[c] <- ls_poisson_cover(capacity[c], P$cap_increment[c] * added[c], cap)
   }
-  if (is.na(target)) return(list(cells = integer(0), cost = 0, infeasible = TRUE))
-  keep  <- intersect(keep, pool)
-  order <- c(ls_shuffle(keep), setdiff(ls_install_order(P, pool), keep))
-  # Clustered placement may cover few cells; top up with the rest of the pool
-  if (I$placement == "clustered" && isTRUE(I$fill_budget)) order <- c(order, ls_shuffle(setdiff(pool, order)))
-  ls_greedy(P, order, P$install_cost, if (ignore_budget) Inf else budget, target,
-            max(0, round(ls_num(I$min_spacing, 0))))
+
+  min_site <- min(uc[valid])
+  lo <- max(spent, min_site)
+  hi <- max(max(budget_limit, min_site), lo)
+  run_budget <- stats::runif(1, lo, hi)
+
+  weights <- rep(1, n)
+  if (connect && !is.null(initial)) {
+    for (c in initial$cells) weights[P$neighbors[[c]]] <- weights[P$neighbors[[c]]] + bonus * added[c]
+  }
+
+  for (guard in seq_len(1e5)) {
+    if (spent >= run_budget) break
+    eligible <- valid[uc[valid] <= (run_budget - spent) & capacity[valid] < (cap - 1e-6)]
+    if (!length(eligible)) break
+    cell <- if (length(eligible) == 1) eligible else sample(eligible, 1, prob = weights[eligible])
+    max_by_budget <- floor((run_budget - spent) / uc[cell])
+    if (max_by_budget < 1) break
+    batch <- sample.int(min(max_drop, max_by_budget), 1)
+    old_cost <- ls_deployment_cost(added[cell], uc[cell], max_drop, max_disc)
+    added[cell] <- added[cell] + batch
+    spent <- spent + ls_deployment_cost(added[cell], uc[cell], max_drop, max_disc) - old_cost
+    capacity[cell] <- ls_poisson_cover(capacity[cell], P$cap_increment[cell] * batch, cap)
+    if (connect) weights[P$neighbors[[cell]]] <- weights[P$neighbors[[cell]]] + bonus * batch
+  }
+  cells <- which(added > 0)
+  list(cells = cells, n = added[cells], cost = spent, budget = run_budget)
 }
 
 ls_decom_order <- function(P, pool) {
@@ -537,29 +733,32 @@ ls_decom_order <- function(P, pool) {
   )
 }
 
-ls_gen_decom <- function(P, budget, keep = integer(0), target = NULL, ignore_budget = FALSE) {
+ls_gen_decom <- function(P, budget, keep = integer(0)) {
   D <- P$cfg$decom
   pool <- P$decom_eligible
   if (!length(pool)) return(list(cells = integer(0), cost = 0))
   n_exist <- sum(P$existing > 0)
   max_n <- min(length(pool), ls_limit(D$max_n), n_exist - ls_num(D$min_retained, 0))
-  if (ignore_budget) target <- length(pool)
-  if (is.null(target)) target <- ls_sample_between(ls_num(D$min_n, 0), max_n)
+  target <- ls_sample_between(ls_num(D$min_n, 0), min(max_n, ls_affordable(P$decom_cost[pool], budget)))
   if (is.na(target)) return(list(cells = integer(0), cost = 0, infeasible = TRUE))
   keep  <- intersect(keep, pool)
   order <- c(ls_shuffle(keep), setdiff(ls_decom_order(P, pool), keep))
-  ls_greedy(P, order, P$decom_cost, if (ignore_budget) Inf else budget, target, 0)
+  chosen <- integer(0); spent <- 0
+  for (i in order) {
+    if (length(chosen) >= target) break
+    if (spent + P$decom_cost[i] > budget) next
+    chosen <- c(chosen, i); spent <- spent + P$decom_cost[i]
+  }
+  list(cells = chosen, cost = spent)
 }
 
 ls_candidate_key <- function(cand) {
-  paste(paste(sort(cand$install), collapse = "."), paste(sort(cand$decom), collapse = "."), sep = "|")
+  paste(paste(cand$install, cand$modules, sep = ":", collapse = "."), paste(sort(cand$decom), collapse = "."), sep = "|")
 }
 
 ls_check_candidate <- function(P, cand) {
   type <- P$cfg$strategy$type
   notes <- character()
-  if (type %in% c("install", "mixed") && length(cand$install) < ls_num(P$cfg$install$min_n, 0))
-    notes <- c(notes, "fewer installs than the minimum")
   if (type %in% c("decommission", "mixed") && length(cand$decom) < ls_num(P$cfg$decom$min_n, 0))
     notes <- c(notes, "fewer removals than the minimum")
   cand$feasible <- !length(notes)
@@ -567,8 +766,8 @@ ls_check_candidate <- function(P, cand) {
   cand
 }
 
-# kind: baseline_none | baseline_all | random | evolutionary
-ls_generate_candidate <- function(P, kind = "random", elite = NULL) {
+# kind: baseline_none | random | evolutionary (mutates `parent`, as the script's MOEA mode)
+ls_generate_candidate <- function(P, kind = "random", parent = NULL) {
   cfg  <- P$cfg
   type <- cfg$strategy$type
   do_i <- type %in% c("install", "mixed")
@@ -576,45 +775,28 @@ ls_generate_candidate <- function(P, kind = "random", elite = NULL) {
   inst_budget  <- ls_limit(cfg$install$budget)
   decom_budget <- if (type == "mixed" && isTRUE(cfg$strategy$shared_budget)) inst_budget else ls_limit(cfg$decom$budget)
 
-  empty <- list(cells = integer(0), cost = 0)
-  if (kind == "baseline_none") {
-    d <- empty; i <- empty
-  } else if (kind == "baseline_all") {
-    d <- if (do_d) ls_gen_decom(P, Inf, ignore_budget = TRUE) else empty
-    i <- if (do_i) ls_gen_install(P, Inf, ignore_budget = TRUE) else empty
-  } else {
-    rate <- ls_num(cfg$search$mutation_rate, 0.15)
-    mutate_keep <- function(x) x[runif(length(x)) > rate]
-    jitter <- function(n, lo, hi) {
-      n <- n + sample(-max(1, round(rate * n)):max(1, round(rate * n)), 1)
-      max(lo, min(hi, n))
-    }
-    keep_d <- if (kind == "evolutionary" && !is.null(elite)) mutate_keep(elite$decom) else integer(0)
-    keep_i <- if (kind == "evolutionary" && !is.null(elite)) mutate_keep(elite$install) else integer(0)
-
-    d <- empty
-    if (do_d) {
-      tgt <- NULL
-      if (kind == "evolutionary" && !is.null(elite)) {
-        hi <- min(length(P$decom_eligible), ls_limit(cfg$decom$max_n), sum(P$existing > 0) - ls_num(cfg$decom$min_retained, 0))
-        tgt <- jitter(length(elite$decom), ls_num(cfg$decom$min_n, 0), hi)
+  empty_i <- list(cells = integer(0), n = numeric(0), cost = 0, budget = 0)
+  empty_d <- list(cells = integer(0), cost = 0)
+  d <- empty_d; i <- empty_i
+  if (kind != "baseline_none") {
+    keep_d <- integer(0); initial <- NULL
+    if (kind == "evolutionary" && !is.null(parent)) {
+      share <- stats::runif(1, ls_num(cfg$search$mutation_min, 0.1), ls_num(cfg$search$mutation_max, 0.4))
+      if (length(parent$install)) {
+        drop <- sample(seq_along(parent$install), ceiling(share * length(parent$install)))
+        initial <- list(cells = parent$install[-drop], n = parent$modules[-drop])
       }
-      d <- ls_gen_decom(P, decom_budget, keep_d, tgt)
+      keep_d <- parent$decom[stats::runif(length(parent$decom)) > share]
     }
-    i <- empty
+    if (do_d) d <- ls_gen_decom(P, decom_budget, keep_d)
     if (do_i) {
       remaining <- if (type == "mixed" && isTRUE(cfg$strategy$shared_budget)) inst_budget - d$cost else inst_budget
-      tgt <- NULL
-      if (kind == "evolutionary" && !is.null(elite) && !isTRUE(cfg$install$fill_budget)) {
-        hi <- min(length(P$install_valid), ls_limit(cfg$install$max_n))
-        tgt <- jitter(length(elite$install), ls_num(cfg$install$min_n, 0), hi)
-      }
-      i <- ls_gen_install(P, remaining, keep_i, tgt)
+      i <- ls_gen_modules(P, remaining, initial)
     }
   }
-  cand <- list(kind = kind, install = i$cells, decom = d$cells,
-               install_cost = i$cost, decom_cost = d$cost)
-  if (kind %in% c("random", "evolutionary")) cand <- ls_check_candidate(P, cand) else { cand$feasible <- TRUE; cand$note <- "" }
+  cand <- list(kind = kind, install = i$cells, modules = i$n, decom = d$cells,
+               install_cost = i$cost, decom_cost = d$cost, budget_drawn = i$budget)
+  if (kind == "baseline_none") { cand$feasible <- TRUE; cand$note <- "" } else cand <- ls_check_candidate(P, cand)
   cand
 }
 
@@ -623,8 +805,8 @@ ls_generate_candidate <- function(P, kind = "random", elite = NULL) {
 ls_apply_candidate <- function(P, cand) {
   I <- P$cfg$install; D <- P$cfg$decom
   s    <- P$struct0
-  habs <- lapply(P$hab0, function(v) { v[is.na(v) & P$water] <- 0; v })
-  nat_sum <- function(idx) Reduce(`+`, lapply(habs, `[`, idx), rep(0, length(idx)))
+  habs <- P$hab0
+  nat_sum <- function(idx) Reduce(`+`, lapply(habs, function(v) { x <- v[idx]; x[is.na(x)] <- 0; x }), rep(0, length(idx)))
 
   # Decommissioning: remove (part of) the structure and give the freed area back to natural habitat
   d <- cand$decom
@@ -646,25 +828,45 @@ ls_apply_candidate <- function(P, cand) {
     }
   }
 
-  # Installation: add structure and displace natural habitat
-  i <- cand$install
-  if (length(i)) {
-    cov <- ls_num(I$coverage_fraction, 1)
-    added <- pmax(0, pmin(1, s[i] + cov) - s[i])
-    s[i] <- s[i] + added
-    if (length(habs)) {
-      if (I$displacement == "proportional") {
-        N <- nat_sum(i)
-        f <- ifelse(N > 0, pmax(0, N - added) / N, 1)
-        for (h in names(habs)) habs[[h]][i] <- habs[[h]][i] * f
-      } else if (I$displacement == "subtract") {
-        for (h in names(habs)) habs[[h]][i] <- pmax(0, habs[[h]][i] - added)
-      }
+  # Installation: modules raise the reef cover (Poisson overlap with halos amplified by reef
+  # neighbours) and natural habitat is reduced to the room left in the cell
+  chosen <- cand$install
+  n_modules <- 0; mean_capacity <- 0
+  if (length(chosen)) {
+    cap <- ls_num(I$max_reef_fraction, 1)
+    before <- s
+    added <- numeric(length(s)); added[chosen] <- cand$modules
+    rp <- ls_reef_metrics(P$depth[chosen], cand$modules, P$cell_area_m2[chosen], chosen,
+                          (before > 0) | (added > 0), P$neighbors, I)
+    s[chosen] <- ls_poisson_cover(before[chosen], rp$unit_fraction * rp$n_units, cap)
+    reef_cov  <- pmax(0, pmin(cap, s[chosen]) - before[chosen])
+    if (length(habs) && !identical(I$displacement, "none")) {
+      room0 <- pmax(1e-12, 1 - before[chosen])
+      resc  <- pmax(0, (room0 - reef_cov) / room0)
+      for (h in names(habs)) habs[[h]][chosen] <- habs[[h]][chosen] * resc
     }
+    n_modules <- sum(rp$n_units)
+    mean_capacity <- mean(s[chosen])
   }
-
   s[is.na(P$depth)] <- NA
-  list(structure = s, habitats = habs)
+
+  # Spatial construction and connectivity metrics
+  active <- !is.na(s) & s > 0
+  contig <- if (any(active)) mean(vapply(which(active), function(i) sum(active[P$neighbors[[i]]]), numeric(1))) else 0
+  list(structure = s, habitats = habs,
+       metrics = list(n_modules = n_modules, mean_capacity = mean_capacity,
+                      total_reef_cells = sum(active), mean_contiguity = contig,
+                      footprint_km2 = sum(P$cell_area_m2[active]) / 1e6,
+                      modules_per_cell = if (length(chosen)) n_modules / length(chosen) else 0))
+}
+
+# AAIGrid writes sidecar files (.prj, .asc.aux.xml) that Ecospace does not need
+ls_cleanup_aux <- function(asc_path) {
+  stem <- sub("\\.asc$", "", asc_path, ignore.case = TRUE)
+  for (ext in c(".prj", ".asc.aux.xml", ".aux", ".asc.xml")) {
+    f <- paste0(stem, ext)
+    if (file.exists(f)) try(file.remove(f), silent = TRUE)
+  }
 }
 
 ls_write_asc <- function(P, vals, path) {
@@ -733,29 +935,40 @@ ls_write_stconfig <- function(stconfig, layer_files, path) {
   path
 }
 
+# Like structure_optimization.R, the command file is the region's template with the output folder
+# set. The model and STConfig paths are pointed at this folder's copies (so it runs from any
+# location), and run settings are written only when they differ from the template.
 ls_write_cmd <- function(P, run_dir, stconfig_path) {
   M <- P$cfg$model
   lines <- readLines(M$cmd_template, warn = FALSE)
+  tmpl  <- ls_read_cmd_tags(M$cmd_template)
+  lines <- ls_set_tag(lines, "<ECOSPACE_OUTPUT_DIR>", ls_winpath(run_dir))
+  lines <- ls_set_tag(lines, "<EWE_MODEL_FILE>", ls_winpath(M$model_file))
+  lines <- ls_set_tag(lines, "<SPATIAL_CONFIG_FILE>", ls_winpath(stconfig_path))
+
   b <- function(x) if (isTRUE(x)) "True" else "False"
-  tags <- list(
-    "<EWE_MODEL_FILE>"              = ls_winpath(M$model_file),
-    "<SPATIAL_CONFIG_FILE>"         = ls_winpath(stconfig_path),
-    "<ECOSIM_SCENARIO_INDEX>"       = ls_num(M$ecosim_scenario, 1),
-    "<ECOSPACE_SCENARIO_INDEX>"     = ls_num(M$ecospace_scenario, 1),
-    "<N_ECOSPACE_YEARS>"            = ls_num(M$n_years, 30),
-    "<ECOSPACE_USE_SPINUP>"         = b(M$use_spinup),
-    "<ECOSPACE_SPINUP_LENGTH>"      = ls_num(M$spinup_years, 5),
-    "<N_ECOSPACE_TIMESTEPS_YEAR>"   = ls_num(M$timesteps_year, 12),
-    "<N_BIOMASS_THREADS>"           = ls_num(M$n_threads, 15),
-    "<N_GRID_THREADS>"              = ls_num(M$n_threads, 15),
-    "<N_EFFORT_DIST_THREADS>"       = ls_num(M$n_threads, 15),
-    "<N_IBM_MOVEMENT_THREADS>"      = ls_num(M$n_threads, 15),
-    "<ECOSPACE_USE_CORE_OUPUT_DIR>" = "False",
-    "<ECOSPACE_OUTPUT_DIR>"         = ls_winpath(run_dir),
-    "<ECOSPACE_USE_ANNUAL_OUTPUT>"  = "True",
-    "<ECOSPACE_SAVE_AVERAGED_BIOMASS>" = "True"
+  th <- ls_num(M$n_threads, NA)
+  settings <- list(
+    "<ECOSIM_SCENARIO_INDEX>"     = ls_num(M$ecosim_scenario, NA),
+    "<ECOSPACE_SCENARIO_INDEX>"   = ls_num(M$ecospace_scenario, NA),
+    "<N_ECOSPACE_YEARS>"          = ls_num(M$n_years, NA),
+    "<ECOSPACE_USE_SPINUP>"       = if (is.null(M$use_spinup)) NA else b(M$use_spinup),
+    "<ECOSPACE_SPINUP_LENGTH>"    = ls_num(M$spinup_years, NA),
+    "<N_ECOSPACE_TIMESTEPS_YEAR>" = ls_num(M$timesteps_year, NA),
+    "<N_BIOMASS_THREADS>"         = th, "<N_GRID_THREADS>" = th,
+    "<N_EFFORT_DIST_THREADS>"     = th, "<N_IBM_MOVEMENT_THREADS>" = th
   )
-  for (tg in names(tags)) lines <- ls_set_tag(lines, tg, tags[[tg]])
+  same <- function(a, b) {
+    if (is.na(b)) return(FALSE)
+    na <- suppressWarnings(as.numeric(a)); nb <- suppressWarnings(as.numeric(b))
+    if (!is.na(na) && !is.na(nb)) return(isTRUE(all.equal(na, nb)))
+    identical(tolower(as.character(a)), tolower(as.character(b)))
+  }
+  for (tg in names(settings)) {
+    v <- settings[[tg]]
+    if (is.na(v)) next
+    if (!same(v, unname(tmpl[tg]))) lines <- ls_set_tag(lines, tg, v)
+  }
   extra <- trimws(unlist(strsplit(M$extra_tags %||% "", "\n")))
   extra <- extra[nzchar(extra)]
   for (ln in extra) {
@@ -787,15 +1000,24 @@ ls_read_ewe_csv <- function(run_dir, file_pattern) {
            error = function(e) NULL)
 }
 
-ls_evaluate_objectives <- function(run_dir, objectives, last_n = 1) {
-  last_n <- max(1, round(ls_num(last_n, 1)))
-  tail_mean <- function(x) mean(tail(x, last_n), na.rm = TRUE)
+ls_split_targets <- function(x) {
+  if (is.null(x) || all(is.na(x))) return(character())
+  t <- trimws(unlist(strsplit(as.character(x), ",")))
+  t[nzchar(t)]
+}
+
+# Objective values as in structure_optimization.R: means over the last N years; species objectives
+# sum every column matching any target (and the fleet, if given); revenue = catch x lbs/t x $/lb x
+# fleet multiplier over the whole model area; biodiversity = Shannon index of group biomass
+ls_evaluate_objectives <- function(run_dir, objectives, last_n = 5, econ = ls_default_econ(), area_km2 = 1) {
+  last_n <- max(1, round(ls_num(last_n, 5)))
   shannon <- function(row) {
     p <- row[!is.na(row) & row > 0]
     if (!length(p)) return(0)
     p <- p / sum(p)
     -sum(p * log(p))
   }
+  prices <- econ$prices; fleets <- econ$fleets
   cache <- list()
   res <- list()
   for (k in seq_len(nrow(objectives))) {
@@ -805,30 +1027,45 @@ ls_evaluate_objectives <- function(run_dir, objectives, last_n = 1) {
     df <- cache[[obj$file_pattern]]
 
     if (!is.null(df) && nrow(df) > 0 && ncol(df) > 1) {
-      is_ts <- grepl("time|year|step", tolower(trimws(colnames(df)[1])))
+      tv <- suppressWarnings(as.numeric(as.character(df[[1]])))
+      rows <- if (any(is.finite(tv))) which(tv >= max(tv, na.rm = TRUE) - (last_n - 1)) else integer(0)
+      if (!length(rows)) rows <- nrow(df)
       num <- suppressWarnings(matrix(as.numeric(as.character(unlist(df[, -1, drop = FALSE]))), nrow = nrow(df)))
-      target <- tolower(trimws(obj$target))
       cols <- tolower(trimws(colnames(df)))
-      col_match <- if (!is.na(target) && nzchar(target)) {
-        m <- which(cols == target)
-        if (!length(m)) m <- which(grepl(target, cols, fixed = TRUE))
-        m[m > 1] - 1
-      } else integer(0)
+      fleet <- if (!is.null(obj$fleet) && !is.na(obj$fleet) && nzchar(obj$fleet)) tolower(trimws(obj$fleet)) else NA_character_
 
       if (obj$type == "sum") {
-        val <- if (is_ts) tail_mean(rowSums(num, na.rm = TRUE)) else sum(num, na.rm = TRUE)
-      } else if (obj$type == "species" && length(target) && !is.na(target)) {
-        if (is_ts) {
-          if (length(col_match)) val <- tail_mean(rowSums(num[, col_match, drop = FALSE], na.rm = TRUE))
-        } else {
-          rows <- tolower(trimws(as.character(df[[1]])))
-          row_match <- which(rows == target)
-          if (!length(row_match)) row_match <- which(grepl(target, rows, fixed = TRUE))
-          if (length(row_match)) val <- sum(num[row_match[1], ], na.rm = TRUE)
-          else if (length(col_match)) val <- sum(num[, col_match, drop = FALSE], na.rm = TRUE)
+        val <- mean(rowSums(num, na.rm = TRUE)[rows], na.rm = TRUE)
+      } else if (obj$type == "species") {
+        hit <- integer(0)
+        for (t in tolower(ls_split_targets(obj$target))) {
+          m <- which(grepl(t, cols, fixed = TRUE))
+          if (!is.na(fleet)) m <- m[grepl(fleet, cols[m], fixed = TRUE)]
+          hit <- c(hit, m[m > 1] - 1)
         }
+        hit <- unique(hit)
+        if (length(hit)) val <- mean(rowSums(num[, hit, drop = FALSE], na.rm = TRUE)[rows], na.rm = TRUE)
+      } else if (obj$type == "revenue") {
+        total <- 0
+        for (ci in seq_along(cols)[-1]) {
+          cn <- cols[ci]
+          if (!is.na(fleet) && !grepl(fleet, cn, fixed = TRUE)) next
+          mult <- 1
+          if (is.na(fleet) && !is.null(fleets) && nrow(fleets)) {
+            f <- which(vapply(tolower(trimws(fleets$fleet)), grepl, logical(1), x = cn, fixed = TRUE))
+            if (length(f)) mult <- as.numeric(fleets$multiplier[f[1]])
+          }
+          price <- ls_num(econ$default_price, 1)
+          if (!is.null(prices) && nrow(prices)) {
+            p <- which(vapply(tolower(trimws(prices$species)), grepl, logical(1), x = cn, fixed = TRUE))
+            if (length(p)) price <- as.numeric(prices$price[p[1]])
+          }
+          avg <- mean(num[rows, ci - 1], na.rm = TRUE)
+          if (is.finite(avg)) total <- total + avg * ls_num(econ$lbs_per_mt, 2204.62) * price * mult
+        }
+        val <- total * area_km2
       } else if (obj$type == "biodiversity") {
-        val <- if (is_ts) tail_mean(apply(num, 1, shannon)) else shannon(rowSums(num, na.rm = TRUE))
+        val <- mean(apply(num, 1, shannon)[rows], na.rm = TRUE)
       }
     }
     if (!is.finite(val)) val <- NA_real_
@@ -846,7 +1083,7 @@ ls_synthetic_objectives <- function(P, layers, objectives) {
   res <- list()
   for (k in seq_len(nrow(objectives))) {
     a <- 0.4 + 0.3 * (k %% 3); b <- 0.15 + 0.1 * (k %% 2)
-    res[[objectives$name[k]]] <- 100 * (1 + a * x - b * x^2 + 0.2 * dep * (k %% 2 - 0.5)) * (1 + rnorm(1, 0, 0.01))
+    res[[objectives$name[k]]] <- 100 * (1 + a * x - b * x^2 + 0.2 * dep * (k %% 2 - 0.5)) * (1 + stats::rnorm(1, 0, 0.01))
   }
   res
 }
@@ -856,42 +1093,80 @@ ls_synthetic_objectives <- function(P, layers, objectives) {
 # Derived columns that ls_score() recomputes from scratch
 ls_strip_scores <- function(df) {
   if (is.null(df)) return(NULL)
-  drop <- names(df) %in% c("Composite_Score", "Pareto") | grepl("_vs_status_quo_pct$", names(df))
+  derived <- c("Composite_Score", "Pareto", "Cost_Frontier", "Gross_Revenue_Gain", "Years_To_Benefit",
+               "Lbs_Gained_Per_Module", "Lbs_Gained_Per_USD", "USD_Gained_Per_USD")
+  drop <- names(df) %in% derived | grepl("_vs_status_quo_pct$|^Net_.*_Gain_(Lbs|USD)$", names(df))
   df[, !drop, drop = FALSE]
 }
 
-ls_score <- function(df, objectives) {
-  ok <- df$finished %in% TRUE
+# As structure_optimization.R: each objective's change relative to the status quo, times its weight
+# (sign flipped for "min"), summed into the composite score; the Pareto front uses the objectives
+# with weight > 0. Absolute gains are converted to pounds (whole model area) and dollars.
+ls_score <- function(df, objectives, area_km2 = 1, econ = ls_default_econ(), roi_objective = "RS_Catch",
+                     revenue_objective = "Total_Revenue") {
+  ok <- df$finished %in% TRUE & df$kind != "probe"   # a probe run read the wrong maps; never scored
   df$Composite_Score <- NA_real_
   df$Pareto <- FALSE
-  if (!any(ok)) return(df)
+  df$Cost_Frontier <- FALSE
+  sq <- which(df$kind == "baseline_none" & ok)
+  sq <- if (length(sq)) sq[1] else NA_integer_
+  lbs <- ls_num(econ$lbs_per_mt, 2204.62)
+
   comp <- rep(0, nrow(df))
   for (k in seq_len(nrow(objectives))) {
     obj <- objectives[k, ]
-    v <- suppressWarnings(as.numeric(df[[obj$name]]))
-    if (is.null(df[[obj$name]])) v <- rep(NA_real_, nrow(df))
-    rng <- range(v[ok], na.rm = TRUE, finite = TRUE)
-    norm <- if (all(is.finite(rng)) && rng[2] > rng[1]) (v - rng[1]) / (rng[2] - rng[1]) else rep(0, nrow(df))
-    if (obj$direction == "min") norm <- 1 - norm
-    norm[is.na(norm)] <- 0
-    comp <- comp + norm * ls_num(obj$weight, 1)
+    v <- if (is.null(df[[obj$name]])) rep(NA_real_, nrow(df)) else suppressWarnings(as.numeric(df[[obj$name]]))
+    b <- if (!is.na(sq)) v[sq] else NA_real_
+    rel <- if (is.finite(b)) { if (b != 0) (v - b) / b else (v - b) } else rep(NA_real_, nrow(df))
+    df[[paste0(obj$name, "_vs_status_quo_pct")]] <- 100 * rel
+    w <- ls_num(obj$weight, 1)
+    comp <- comp + ifelse(is.na(rel), 0, rel * w * (if (obj$direction == "min") -1 else 1))
+    gain <- if (is.finite(b)) v - b else rep(NA_real_, nrow(df))
+    if (obj$type %in% c("species", "sum")) df[[paste0("Net_", obj$name, "_Gain_Lbs")]] <- round(gain * area_km2 * lbs, 2)
+    if (obj$type == "revenue") df[[paste0("Net_", obj$name, "_Gain_USD")]] <- round(gain, 2)
   }
-  df$Composite_Score[ok] <- comp[ok]
+  if (!is.na(sq)) df$Composite_Score[ok] <- comp[ok]
+
+  # Reporting KPIs from the ROI and revenue objectives
+  cost <- df$total_cost
+  roi_lbs <- df[[paste0("Net_", roi_objective, "_Gain_Lbs")]]
+  rev_gain <- df[[paste0("Net_", revenue_objective, "_Gain_USD")]]
+  nmod <- if (is.null(df$n_modules)) rep(0, nrow(df)) else df$n_modules
+  if (!is.null(roi_lbs)) {
+    df$Lbs_Gained_Per_Module <- ifelse(nmod > 0, roi_lbs / nmod, 0)
+    df$Lbs_Gained_Per_USD    <- ifelse(cost > 0, roi_lbs / cost, 0)
+  }
+  if (!is.null(rev_gain)) {
+    df$Gross_Revenue_Gain <- rev_gain
+    df$USD_Gained_Per_USD <- ifelse(cost > 0, rev_gain / cost, 0)
+    df$Years_To_Benefit   <- ifelse(!is.na(rev_gain) & rev_gain > 0, cost / rev_gain, NA_real_)
+  }
+
+  # Pareto front over the weighted objectives (raw values, oriented so larger is better)
+  scored <- objectives[suppressWarnings(as.numeric(objectives$weight)) > 0, , drop = FALSE]
+  idx <- which(ok)
+  if (length(idx) && nrow(scored)) {
+    M <- sapply(seq_len(nrow(scored)), function(j) {
+      v <- suppressWarnings(as.numeric(df[[scored$name[j]]][idx]))
+      v[is.na(v)] <- -Inf
+      if (scored$direction[j] == "min") -v else v
+    })
+    M <- matrix(M, nrow = length(idx))
+    for (a in seq_along(idx)) {
+      dominated <- FALSE
+      for (b in seq_along(idx)) {
+        if (a != b && all(M[b, ] >= M[a, ]) && any(M[b, ] > M[a, ])) { dominated <- TRUE; break }
+      }
+      df$Pareto[idx[a]] <- !dominated
+    }
+  }
 
   # Cost-efficiency frontier: no other run scores higher for the same or lower cost
-  cand <- which(ok & is.finite(df$total_cost))
+  cand <- which(ok & is.finite(df$total_cost) & is.finite(df$Composite_Score))
   for (a in cand) {
-    b <- setdiff(cand, a)
-    df$Pareto[a] <- !any(df$Composite_Score[b] >= df$Composite_Score[a] & df$total_cost[b] <= df$total_cost[a] &
-                         (df$Composite_Score[b] > df$Composite_Score[a] | df$total_cost[b] < df$total_cost[a]))
-  }
-
-  # Percent change of each objective relative to the no-change baseline (status quo)
-  base <- which(df$kind == "baseline_none" & ok)
-  for (nm in objectives$name) {
-    v <- if (is.null(df[[nm]])) rep(NA_real_, nrow(df)) else suppressWarnings(as.numeric(df[[nm]]))
-    b <- if (length(base)) v[base[1]] else NA_real_
-    df[[paste0(nm, "_vs_status_quo_pct")]] <- if (is.finite(b) && b != 0) 100 * (v - b) / abs(b) else NA_real_
+    o <- setdiff(cand, a)
+    df$Cost_Frontier[a] <- !any(df$Composite_Score[o] >= df$Composite_Score[a] & df$total_cost[o] <= df$total_cost[a] &
+                                (df$Composite_Score[o] > df$Composite_Score[a] | df$total_cost[o] < df$total_cost[a]))
   }
   df
 }
@@ -907,28 +1182,62 @@ ls_new_session <- function(cfg, repo_root) {
   dir.create(S$session_dir, recursive = TRUE, showWarnings = FALSE)
   if (!is.na(ls_num(cfg$search$seed))) set.seed(ls_num(cfg$search$seed))
 
+  S$log <- character()
+  ls_log(S, sprintf("Live Solver version %s", ls_version()))
+  started <- FALSE
+  on.exit(if (!started) {
+    if (!is.null(S$restore)) for (k in seq_len(nrow(S$restore))) file.copy(S$restore$src[k], S$restore$dest[k], overwrite = TRUE)
+    unlink(file.path(cfg$model$inputs_dir, ls_lock_name))
+  }, add = TRUE)
   S$P <- ls_build_problem(cfg, S$session_dir)
   ls_save_config(cfg, file.path(S$session_dir, "solver_config.json"))
+  if (!isTRUE(cfg$search$dry_run)) ls_save_settings(repo_root, cfg)
 
-  S$total_runs <- round(ls_num(cfg$search$iterations, 0)) + if (isTRUE(cfg$search$include_baselines)) 2 else 0
+  S$total_runs <- round(ls_num(cfg$search$iterations, 100)) + 1   # + the status quo run
   S$i       <- 0
   S$results <- NULL
   S$cands   <- list()
   S$seen    <- character()
-  S$log     <- character()
   S$results_file <- file.path(S$session_dir, "optimization_results.csv")
   S$closed  <- FALSE
 
-  # Overwrite mode: Ecospace reads the Inputs maps, so guard them with a lock for crash recovery
-  if (cfg$search$map_mode == "overwrite" && !isTRUE(cfg$search$dry_run)) {
-    write_json(list(snapshot_dir = S$P$snapshot_dir, files = S$P$layers$file),
-               file.path(cfg$model$inputs_dir, ls_lock_name), auto_unbox = TRUE)
-    S$stconfig <- ls_write_stconfig(cfg$model$stconfig, setNames(S$P$layers$file, S$P$layers$name),
-                                    file.path(S$session_dir, "STConfig_session.xml"))
+  # Ecospace reads one fixed STConfig file and the maps it lists, so each run overwrites those maps.
+  # The region's own STConfig is repaired in place to point at this folder's Inputs maps (its stored
+  # paths may come from another computer). Everything touched is snapshotted, guarded by a lock for
+  # crash recovery, and restored when the session ends.
+  S$targets <- setNames(S$P$layers$file, S$P$layers$name)   # map files Ecospace reads, per layer
+  if (!isTRUE(cfg$search$dry_run)) {
+    stc <- normalizePath(cfg$model$stconfig, winslash = "/")
+    file.copy(stc, file.path(S$P$snapshot_dir, basename(stc)), overwrite = TRUE)
+    # Sidecars (.prj, .aux.xml) are removed while maps are overwritten (as in structure_optimization.R);
+    # keep copies so the Inputs folder is left exactly as it was
+    stems <- sub("\\.asc$", "", S$P$layers$file, ignore.case = TRUE)
+    side  <- c(paste0(stems, ".prj"), paste0(stems, ".asc.aux.xml"))
+    side  <- side[file.exists(side)]
+    file.copy(side, file.path(S$P$snapshot_dir, basename(side)), overwrite = TRUE)
+    keep  <- c(S$P$layers$file, stc, side)
+    S$restore <- data.frame(dest = keep, src = file.path(S$P$snapshot_dir, basename(keep)),
+                            stringsAsFactors = FALSE)
+    ls_write_lock(S)
+    S$stconfig <- ls_write_stconfig(stc, S$targets, stc)
+    S$spatiallog <- file.path(dirname(cfg$model$model_file),
+                              paste0(sub("\\.eweaccdb$", "", basename(cfg$model$model_file)), "_spatiallog.txt"))
+    cd <- cfg$model$cache_dir %||% ""
+    ls_check_cache_dir(cd, cfg)
+    ls_log(S, if (nzchar(cd)) sprintf("Ecospace spatial cache folder: %s (emptied before every run)", cd) else
+      "No Ecospace spatial cache folder set; if Ecospace loads layers from its cache, the session stops and says so.")
   }
+  S$alerts <- character()
+  S$alert_keys <- character()
+  started <- TRUE
   ls_log(S, sprintf("Session %s | %s | strategy: %s | %d runs%s", basename(S$session_dir), basename(cfg$model$model_file),
                     cfg$strategy$type, S$total_runs, if (isTRUE(cfg$search$dry_run)) " | DRY RUN (synthetic objectives)" else ""))
   S
+}
+
+ls_write_lock <- function(S) {
+  write_json(list(snapshot_dir = S$P$snapshot_dir, files = S$restore$dest, sources = S$restore$src),
+             file.path(S$cfg$model$inputs_dir, ls_lock_name), auto_unbox = TRUE)
 }
 
 ls_log <- function(S, msg) {
@@ -938,9 +1247,29 @@ ls_log <- function(S, msg) {
   cat(line, "\n", file = file.path(S$session_dir, "solver_log.txt"), append = TRUE)
 }
 
+# Best run so far (highest composite score)
 ls_elite <- function(S) {
   if (is.null(S$results) || !any(is.finite(S$results$Composite_Score))) return(NULL)
   S$cands[[S$results$run[which.max(S$results$Composite_Score)]]]
+}
+
+# Parent for evolutionary mutation: a random run on the Pareto front that built something
+# (structure_optimization.R mode 2)
+ls_pick_parent <- function(S) {
+  df <- S$results
+  if (is.null(df)) return(NULL)
+  front <- which(df$Pareto %in% TRUE)
+  if (!length(front)) return(NULL)
+  spent <- front[df$total_cost[front] > 0]
+  pool <- if (length(spent)) spent else front
+  S$cands[[df$run[if (length(pool) == 1) pool else sample(pool, 1)]]]
+}
+
+# Score with the session's objectives, economics and model area
+ls_rescore <- function(S, df) {
+  cfg <- S$cfg
+  ls_score(ls_strip_scores(df), cfg$objectives, S$P$total_area_km2, cfg$econ,
+           cfg$search$roi_objective %||% "RS_Catch", cfg$search$revenue_objective %||% "Total_Revenue")
 }
 
 ls_next_job <- function(S) {
@@ -948,19 +1277,20 @@ ls_next_job <- function(S) {
   S$i <- S$i + 1
   idx <- S$i
   cfg <- S$cfg
-  base <- isTRUE(cfg$search$include_baselines)
-  kind <- if (base && idx == 1) "baseline_none" else if (base && idx == 2) "baseline_all" else {
-    n_done <- idx - if (base) 2 else 0
-    if (cfg$search$algorithm == "evolutionary" && n_done > ls_num(cfg$search$warmup, 0) && !is.null(ls_elite(S))) "evolutionary" else "random"
+  # Run 1 is the status quo; it is repeated if Ecospace turned out to read maps elsewhere (see ls_check_run)
+  redo <- isTRUE(S$redo_status_quo)
+  S$redo_status_quo <- FALSE
+  kind <- if (idx == 1 || redo) "baseline_none" else {
+    n_done <- sum(S$results$kind %in% c("random", "evolutionary"))
+    if (cfg$search$algorithm == "evolutionary" && n_done >= ls_num(cfg$search$warmup, 0) && !is.null(ls_pick_parent(S))) "evolutionary" else "random"
   }
   cand <- NULL
   for (attempt in seq_len(max(1, ls_num(cfg$search$max_retries, 50)))) {
-    cand <- ls_generate_candidate(S$P, kind, if (kind == "evolutionary") ls_elite(S) else NULL)
-    if (kind %in% c("baseline_none", "baseline_all")) break
+    cand <- ls_generate_candidate(S$P, kind, if (kind == "evolutionary") ls_pick_parent(S) else NULL)
+    if (kind == "baseline_none") break
     if (cand$feasible && !ls_candidate_key(cand) %in% S$seen) break
   }
-  suffix <- c(baseline_none = "_Baseline_None", baseline_all = "_Baseline_All")[kind]
-  run_name <- sprintf("Run_%04d%s", idx, if (is.na(suffix)) "" else suffix)
+  run_name <- sprintf("Run_%04d%s", idx, if (kind == "baseline_none") "_Status_Quo" else "")
   S$seen <- c(S$seen, ls_candidate_key(cand))
   S$cands[[run_name]] <- cand
   list(idx = idx, run = run_name, kind = kind, cand = cand,
@@ -971,8 +1301,8 @@ ls_next_job <- function(S) {
 ls_start_job <- function(S, job) {
   P <- S$P; cfg <- S$cfg
   dir.create(job$run_dir, recursive = TRUE, showWarnings = FALSE)
-  write_json(list(kind = job$kind, install = job$cand$install, decom = job$cand$decom),
-             file.path(job$run_dir, "candidate.json"))
+  write_json(list(kind = job$kind, install = job$cand$install, modules = job$cand$modules, decom = job$cand$decom,
+                  budget_drawn = job$cand$budget_drawn), file.path(job$run_dir, "candidate.json"))
   job$layers <- ls_apply_candidate(P, job$cand)
   job$map_files <- ls_write_layers(P, job$layers, file.path(job$run_dir, "Maps"))
   job$status <- NA_integer_
@@ -988,13 +1318,25 @@ ls_start_job <- function(S, job) {
     return(job)
   }
 
-  if (cfg$search$map_mode == "overwrite") {
-    for (nm in names(job$map_files)) file.copy(job$map_files[[nm]], P$layers$file[P$layers$name == nm], overwrite = TRUE)
-    stconfig <- S$stconfig
-  } else {
-    stconfig <- ls_write_stconfig(cfg$model$stconfig, job$map_files, file.path(job$run_dir, "STConfig_run.xml"))
+  # As structure_optimization.R: write each map straight over the active file in Inputs
+  vals <- c(setNames(list(job$layers$structure), cfg$layers$structure_layer), job$layers$habitats)
+  for (nm in names(job$map_files)) {
+    target <- S$targets[[nm]]
+    r <- rast(P$template)
+    values(r) <- vals[[nm]]
+    ok <- tryCatch({
+      suppressWarnings(writeRaster(r, target, filetype = "AAIGrid", overwrite = TRUE, NAflag = -9999))
+      TRUE
+    }, error = function(e) FALSE)
+    ls_cleanup_aux(target)
+    if (!ok || !identical(unname(tools::md5sum(job$map_files[[nm]])), unname(tools::md5sum(target)))) {
+      stop("Could not overwrite ", target, ". Is it open in another program?")
+    }
   }
-  cmd <- ls_write_cmd(P, job$run_dir, stconfig)
+  # Ecospace caches converted habitat layers and reuses them instead of re-reading the files
+  cd <- cfg$model$cache_dir %||% ""
+  if (nzchar(cd) && dir.exists(cd)) unlink(list.files(cd, full.names = TRUE, all.files = TRUE, no.. = TRUE), recursive = TRUE, force = TRUE)
+  cmd <- ls_write_cmd(P, job$run_dir, S$stconfig)
 
   console <- cfg$model$console_path
   if (!file.exists(console)) stop("Ecospace console not found: ", console, " (enable dry run to test without it)")
@@ -1035,18 +1377,22 @@ ls_finish_job <- function(S, job) {
   } else if (dry) {
     ls_synthetic_objectives(P, job$layers, cfg$objectives)
   } else {
-    ls_evaluate_objectives(job$run_dir, cfg$objectives, cfg$search$eval_last_n)
+    ls_evaluate_objectives(job$run_dir, cfg$objectives, cfg$search$eval_last_n, cfg$econ, P$total_area_km2)
   }
   s <- job$layers$structure
   total_cost <- cand$install_cost + cand$decom_cost
-  roi_obj <- obj[[cfg$search$roi_objective %||% ""]]
+  m <- job$layers$metrics
   row <- data.frame(
     run = job$run, iteration = job$idx, kind = job$kind,
-    n_installed = length(cand$install), n_decommissioned = length(cand$decom),
-    n_structures = sum(s > 0, na.rm = TRUE), structure_coverage = round(sum(s, na.rm = TRUE), 4),
+    n_installed = length(cand$install), n_modules = m$n_modules, n_decommissioned = length(cand$decom),
+    budget_drawn = round(ls_num(cand$budget_drawn, 0), 2),
     install_cost = round(cand$install_cost, 2), decom_cost = round(cand$decom_cost, 2),
     total_cost = round(total_cost, 2),
-    ROI_per_dollar = if (!is.null(roi_obj) && !is.na(roi_obj) && total_cost > 0) roi_obj / total_cost else NA_real_,
+    Avg_Cost_Per_Module_USD = if (m$n_modules > 0) round(cand$install_cost / m$n_modules, 2) else 0,
+    Modules_Per_Cell = round(m$modules_per_cell, 2), Mean_Contiguity_Index = round(m$mean_contiguity, 4),
+    Total_Reef_Cells = m$total_reef_cells, Spatial_Footprint_km2 = round(m$footprint_km2, 2),
+    mean_capacity = round(m$mean_capacity, 4),
+    n_structures = sum(s > 0, na.rm = TRUE), structure_coverage = round(sum(s, na.rm = TRUE), 4),
     finished = finished, exit_status = job$status, dry_run = dry,
     runtime_sec = round(as.numeric(difftime(Sys.time(), job$started, units = "secs")), 1),
     map_dir = file.path(job$run_dir, "Maps"), timestamp = ls_timestamp(),
@@ -1055,15 +1401,124 @@ ls_finish_job <- function(S, job) {
   row <- cbind(row, as.data.frame(obj, check.names = FALSE))
   write.csv(row, file.path(job$run_dir, "run_summary.csv"), row.names = FALSE)
 
-  S$results <- ls_score(rbind(ls_strip_scores(S$results), row), cfg$objectives)
+  S$results <- ls_rescore(S, rbind(ls_strip_scores(S$results), row))
   write.csv(S$results, S$results_file, row.names = FALSE)
 
   sc <- S$results$Composite_Score[nrow(S$results)]
-  ls_log(S, sprintf("%s (%s) | +%d / -%d structures | %s | %s | score %s",
-                    job$run, job$kind, row$n_installed, row$n_decommissioned, ls_usd(total_cost),
+  ls_log(S, sprintf("%s (%s) | %s modules in %d cells, -%d structures | %s | %s | score %s",
+                    job$run, job$kind, format(row$n_modules, big.mark = ","), row$n_installed, row$n_decommissioned, ls_usd(total_cost),
                     if (finished) "finished" else sprintf("FAILED (exit %s)", job$status),
                     if (is.na(sc)) "NA" else sprintf("%.3f", sc)))
+  if (finished && !dry) {
+    ls_check_run(S, job, obj)
+    S$results <- ls_rescore(S, S$results)   # a run may have been relabelled
+    write.csv(S$results, S$results_file, row.names = FALSE)
+  }
   invisible(row)
+}
+
+# A user-entered cache folder is emptied before every run, so refuse anything that looks like a
+# general-purpose folder or that holds the model, inputs or the Live Solver itself
+ls_check_cache_dir <- function(cd, cfg) {
+  if (!nzchar(cd)) return(invisible(TRUE))
+  if (!dir.exists(cd)) stop("The Ecospace spatial cache folder does not exist: ", cd)
+  np <- function(x) tolower(sub("/+$", "", normalizePath(x, winslash = "/", mustWork = FALSE)))
+  c0 <- np(cd)
+  home <- Sys.getenv(c("USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA", "TEMP", "TMP", "PROGRAMFILES"))
+  home <- home[nzchar(home)]
+  protected <- np(c(home, file.path(home, "Documents"), file.path(home, "Desktop"), file.path(home, "Downloads")))
+  keep <- np(c(cfg$model$model_file, cfg$model$inputs_dir, cfg$model$console_path, getwd()))
+  if (grepl("^[a-z]:$|^$", c0) || c0 %in% protected || any(startsWith(paste0(keep, "/"), paste0(c0, "/")))) {
+    stop("Refusing to use '", cd, "' as the Ecospace spatial cache folder: its contents are deleted before every run, ",
+         "and this looks like a general folder or contains the model or the Live Solver. Choose the cache folder itself.")
+  }
+  invisible(TRUE)
+}
+
+# Diagnostics after a real run: did Ecospace read this run's structure map, and did anything change?
+# Logged every time; shown in the app once per kind of problem
+ls_alert <- function(S, msg, key = msg) {
+  ls_log(S, paste("WARNING:", msg))
+  if (!key %in% S$alert_keys) {
+    S$alert_keys <- c(S$alert_keys, key)
+    S$alerts <- c(S$alerts, msg)
+  }
+}
+
+ls_check_run <- function(S, job, obj) {
+  norm_path <- function(x) tolower(gsub("\\\\", "/", x))
+  log <- S$spatiallog
+  loaded <- character()
+  if (!is.null(log) && file.exists(log) && file.mtime(log) >= job$started - 5) {
+    file.copy(log, file.path(job$run_dir, "spatiallog.txt"), overwrite = TRUE)
+    log_lines <- readLines(log, warn = FALSE)
+    loaded <- unique(sub(".*Loaded data from '(.*)'.*", "\\1", grep("Loaded data from '", log_lines, value = TRUE)))
+    if (any(grepl("Loaded from cache", log_lines, fixed = TRUE))) {
+      # This run used cached layers, not the solver's maps: never score it
+      S$results$kind[S$results$run == job$run] <- "probe"
+      cd <- S$cfg$model$cache_dir %||% ""
+      ls_alert(S, sprintf("%s: Ecospace loaded the habitat maps from its spatial data cache instead of the files the solver wrote, so this run is not scored. %s",
+                          job$run, if (nzchar(cd)) {
+                            sprintf("The folder set as the cache (%s) was emptied before the run, so Ecospace's cache must be somewhere else.", cd)
+                          } else {
+                            "Set 'Ecospace spatial cache folder' on the Start here tab (it shows how to find the folder) and start again."
+                          }), key = "cache")
+      # Every later run would read the same cache, so stop rather than produce identical scenarios
+      if (job$kind == "baseline_none") {
+        S$total_runs <- S$i
+        ls_log(S, "Stopped: the status quo run was served from Ecospace's cache.")
+      }
+      return(invisible())
+    }
+  } else {
+    ls_alert(S, sprintf("%s: Ecospace wrote no spatial log (%s), so the solver cannot confirm which maps it read.", job$run, log),
+             key = "no_spatiallog")
+  }
+
+  # Ecospace may read the maps listed in the STConfig saved with the model, not the one passed to it.
+  # After the first run, retarget to the files it actually loaded (snapshot them, restore at the end)
+  # and repeat the status quo run with the solver's maps.
+  if (length(loaded) && !isTRUE(S$targets_checked)) {
+    S$targets_checked <- TRUE
+    moved <- character()
+    for (nm in names(S$targets)) {
+      hit <- loaded[tolower(basename(gsub("\\\\", "/", loaded))) == tolower(basename(S$targets[[nm]]))]
+      if (!length(hit) || norm_path(hit[1]) == norm_path(S$targets[[nm]])) next
+      ext <- if (.Platform$OS.type == "windows") hit[1] else gsub("\\\\", "/", hit[1])
+      if (!file.exists(ext)) {
+        ls_alert(S, sprintf("Ecospace reads the %s map from %s, which this computer cannot open. Re-save the model's spatial configuration to point at this folder's Inputs maps.", nm, ext))
+        next
+      }
+      snap <- file.path(S$P$snapshot_dir, "external", nm, basename(ext))
+      dir.create(dirname(snap), recursive = TRUE, showWarnings = FALSE)
+      file.copy(ext, snap, overwrite = TRUE)
+      S$restore <- rbind(S$restore, data.frame(dest = ext, src = snap, stringsAsFactors = FALSE))
+      S$targets[[nm]] <- ext
+      moved <- c(moved, ext)
+    }
+    if (length(moved)) {
+      ls_write_lock(S)
+      ls_alert(S, sprintf("Ecospace reads its maps from %s (the spatial configuration saved with the model), not from this folder. The solver now updates those files before each run and restores them afterwards. The status quo run is repeated with the solver's maps.",
+                          paste(unique(dirname(moved)), collapse = ", ")))
+      S$results$kind[S$results$run == job$run] <- "probe"
+      S$redo_status_quo <- TRUE
+      S$total_runs <- S$total_runs + 1
+      return(invisible())
+    }
+  }
+  if (length(loaded) && !norm_path(S$targets[[S$cfg$layers$structure_layer]]) %in% norm_path(loaded)) {
+    ls_alert(S, sprintf("%s: Ecospace did not load %s. Its spatial log lists: %s", job$run,
+                        S$targets[[S$cfg$layers$structure_layer]], paste(unique(loaded), collapse = ", ")), key = "wrong_map")
+  }
+  sq <- S$results[S$results$kind == "baseline_none" & S$results$finished %in% TRUE & S$results$run != job$run, , drop = FALSE]
+  changed <- length(job$cand$install) + length(job$cand$decom) > 0
+  if (job$kind != "baseline_none" && changed && nrow(sq)) {
+    same <- vapply(names(obj), function(n) isTRUE(all.equal(as.numeric(obj[[n]]), as.numeric(sq[[n]][1]), tolerance = 0)), logical(1))
+    if (all(same)) {
+      ls_alert(S, sprintf("%s changed %d cells but every outcome is identical to the status quo; Ecospace may not be reading the new maps.",
+                          job$run, length(job$cand$install) + length(job$cand$decom)), key = "identical")
+    }
+  }
 }
 
 # Kill any running console, put pristine maps back and remove the lock
@@ -1071,10 +1526,10 @@ ls_close_session <- function(S, job = NULL) {
   if (isTRUE(S$closed)) return(invisible(NULL))
   if (!is.null(job$proc) && job$proc$is_alive()) job$proc$kill_tree()
   cfg <- S$cfg
-  if (cfg$search$map_mode == "overwrite" && !isTRUE(cfg$search$dry_run)) {
-    for (f in S$P$layers$file) file.copy(file.path(S$P$snapshot_dir, basename(f)), f, overwrite = TRUE)
+  if (!isTRUE(cfg$search$dry_run)) {
+    for (k in seq_len(nrow(S$restore))) file.copy(S$restore$src[k], S$restore$dest[k], overwrite = TRUE)
     unlink(file.path(cfg$model$inputs_dir, ls_lock_name))
-    ls_log(S, "Restored pristine maps to the Inputs folder.")
+    ls_log(S, "Restored the original maps and STConfig in the Inputs folder.")
   }
   if (!is.null(S$results) && any(is.finite(S$results$Composite_Score))) {
     best <- S$results[which.max(S$results$Composite_Score), ]
@@ -1107,41 +1562,67 @@ ls_run_session <- function(cfg, repo_root, on_progress = NULL) {
 
 # Plotting ----
 
-# Layout map: 0 land, 1 water, 2 eligible install, 3 eligible decom, 4 existing kept,
-# 5 new installation, 6 decommissioned
-ls_layout_codes <- function(P, cand = NULL, show_eligible = TRUE) {
-  z <- ifelse(P$water, 1, 0)
-  z[P$existing > 0 & P$water] <- 4
-  if (show_eligible) {
-    z[P$install_valid]  <- 2
-    z[P$decom_eligible] <- 3
-  }
-  if (!is.null(cand)) {
-    z[cand$install] <- 5
-    z[cand$decom]   <- 6
-  }
-  z
-}
-
-ls_layout_colors <- c("#d9d9d9", "#dbe9f6", "#b8e0b0", "#f6c7c7", "#4d4d4d", "#f28e1c", "#d62728")
-ls_layout_labels <- c("Land", "Water", "Eligible: install", "Eligible: decommission",
-                      "Existing structure", "New structure", "Decommissioned")
+# Layout map: structure cells are shaded by the proportion of the cell that is structure
+# (the value Ecospace reads), on a land / water / eligible-for-installation background.
+# New and decommissioned cells are outlined so changes stay visible at any cover.
+ls_cover_breaks <- c(0, 0.2, 0.4, 0.6, 0.8, 1)
+ls_cover_colors <- c("#86b6ef", "#3987e5", "#256abf", "#184f95", "#0d366b")
+ls_bg_colors    <- c(land = "#d9d9d9", water = "#eef3f8", eligible = "#d4ecd0")
+ls_new_col      <- "#eb6834"
+ls_removed_col  <- "#d55181"
+ls_decom_ok_col <- "#8a8a8a"
 
 ls_plot_layout <- function(P, cand = NULL, main = "", show_eligible = TRUE) {
-  z <- ls_layout_codes(P, cand, show_eligible)
-  m <- matrix(z, nrow = P$nr, ncol = P$nc, byrow = TRUE)
-  e <- as.vector(ext(P$template))
+  e  <- as.vector(ext(P$template))
+  dx <- (e[2] - e[1]) / P$nc
+  dy <- (e[4] - e[3]) / P$nr
   xs <- seq(e[1], e[2], length.out = P$nc + 1)
   ys <- seq(e[3], e[4], length.out = P$nr + 1)
+  grid <- function(v) t(matrix(v, nrow = P$nr, ncol = P$nc, byrow = TRUE)[P$nr:1, , drop = FALSE])
+
+  bg <- ifelse(P$water, 2, 1)
+  if (show_eligible) bg[P$install_valid] <- 3
+  cover <- if (is.null(cand)) P$struct0 else ls_apply_candidate(P, cand)$structure
+  cover[is.na(cover) | cover <= 0 | !P$water] <- NA
+  cover <- pmin(cover, 1)
+
   op <- par(mar = c(3.4, 3, 2, 1), mgp = c(1.8, 0.5, 0))
   on.exit(par(op))
   # Shrink the plot region to the map's true shape (instead of asp, which pads with blank space)
   ratio <- diff(e[3:4]) / (diff(e[1:2]) * cos(mean(e[3:4]) * pi / 180))
   pin <- par("pin")
   par(pin = if (pin[1] * ratio <= pin[2]) c(pin[1], pin[1] * ratio) else c(pin[2] / ratio, pin[2]))
-  image(xs, ys, t(m[P$nr:1, , drop = FALSE]), col = ls_layout_colors, breaks = seq(-0.5, 6.5, 1),
+  image(xs, ys, grid(bg), col = ls_bg_colors, breaks = c(0.5, 1.5, 2.5, 3.5),
         xlab = "Longitude", ylab = "Latitude", main = main, useRaster = TRUE, xaxs = "i", yaxs = "i")
-  present <- sort(unique(z))
-  legend("bottomright", legend = ls_layout_labels[present + 1], fill = ls_layout_colors[present + 1],
-         cex = 0.75, bg = "white", box.col = "grey70")
+  if (any(!is.na(cover))) {
+    image(xs, ys, grid(cover), col = ls_cover_colors, breaks = ls_cover_breaks, add = TRUE, useRaster = TRUE)
+  }
+
+  outline <- function(idx, col, lwd = 1.6, lty = 1, cross = FALSE) {
+    if (!length(idx)) return(invisible())
+    r <- (idx - 1) %/% P$nc; c <- (idx - 1) %% P$nc
+    x0 <- e[1] + c * dx; y1 <- e[4] - r * dy
+    rect(x0, y1 - dy, x0 + dx, y1, border = col, lwd = lwd, lty = lty)
+    if (cross) segments(c(x0, x0), c(y1 - dy, y1), c(x0 + dx, x0 + dx), c(y1, y1 - dy), col = col, lwd = 1)
+  }
+  if (show_eligible) outline(setdiff(P$decom_eligible, cand$decom), ls_decom_ok_col, lwd = 1, lty = 2)
+  outline(cand$install, ls_new_col)
+  outline(cand$decom, ls_removed_col, cross = TRUE)
+
+  # Legend: background, then cover classes present, then change outlines
+  lab <- c("Land", "Water"); fill <- ls_bg_colors[1:2]; border <- rep("grey55", 2)
+  if (show_eligible && length(P$install_valid)) {
+    lab <- c(lab, "Eligible: install"); fill <- c(fill, ls_bg_colors[3]); border <- c(border, "grey55")
+  }
+  if (any(!is.na(cover))) {
+    used <- sort(unique(cut(cover[!is.na(cover)], ls_cover_breaks, labels = FALSE, include.lowest = TRUE)))
+    lab <- c(lab, sprintf("Structure cover %.0f-%.0f%%", 100 * ls_cover_breaks[used], 100 * ls_cover_breaks[used + 1]))
+    fill <- c(fill, ls_cover_colors[used]); border <- c(border, ls_cover_colors[used])
+  }
+  if (show_eligible && length(setdiff(P$decom_eligible, cand$decom))) {
+    lab <- c(lab, "Eligible: decommission"); fill <- c(fill, NA); border <- c(border, ls_decom_ok_col)
+  }
+  if (length(cand$install)) { lab <- c(lab, "New structure"); fill <- c(fill, NA); border <- c(border, ls_new_col) }
+  if (length(cand$decom))   { lab <- c(lab, "Decommissioned"); fill <- c(fill, NA); border <- c(border, ls_removed_col) }
+  legend("bottomright", legend = lab, fill = fill, border = border, cex = 0.72, bg = "white", box.col = "grey70")
 }
