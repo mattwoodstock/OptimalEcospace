@@ -216,12 +216,19 @@ ui <- page_navbar(
         ),
 
         accordion_panel("Objectives",
-          helpText("Double-click a cell to edit. type: species | sum | biodiversity | revenue; direction: max | min.",
-                   "target: one or more groups separated by commas; fleet: only columns of that fleet.",
-                   "Weight 0 = reported only. file_pattern matches the Ecospace output CSV name."),
+          helpText("The scenarios are ranked by these outcomes. Add more from the list below, or edit the table",
+                   "(double-click a cell). Weight 0 = reported only; direction max = higher is better."),
           DTOutput("obj_table"),
-          div(class = "mt-2",
-            actionButton("obj_add", "Add objective", class = "btn-sm"),
+          div(class = "mt-2 d-flex gap-2 align-items-end flex-wrap",
+            selectInput("obj_pick", "Add from list", choices = NULL, width = "320px"),
+            actionButton("obj_add_lib", "Add", class = "btn-sm btn-primary mb-3")),
+          tags$details(class = "small mb-2",
+            tags$summary("Custom objective"),
+            helpText("type: species | sum | biodiversity | revenue; target: one or more groups separated by commas",
+                     "(matched within the Ecospace output column names); fleet: only that fleet's columns;",
+                     "file_pattern: the Ecospace output CSV name.")),
+          div(class = "mt-1",
+            actionButton("obj_add", "Add custom objective", class = "btn-sm"),
             actionButton("obj_del", "Delete selected", class = "btn-sm"),
             actionButton("obj_reset", "Reset defaults", class = "btn-sm")),
           num("eval_last_n", "Average over the last N years", defaults$search$eval_last_n, min = 1, step = 1),
@@ -434,6 +441,20 @@ server <- function(input, output, session) {
     if (length(s)) objectives(objectives()[-s, , drop = FALSE])
   })
   observeEvent(input$obj_reset, objectives(ls_default_objectives()))
+  # Library entries not yet in the table
+  obj_lib <- ls_objective_library()
+  observeEvent(objectives(), {
+    left <- obj_lib[!obj_lib$name %in% objectives()$name, ]
+    updateSelectInput(session, "obj_pick", choices = setNames(left$name, left$label))
+  })
+  observeEvent(input$obj_add_lib, {
+    req(input$obj_pick)
+    row <- obj_lib[obj_lib$name == input$obj_pick, setdiff(names(obj_lib), c("label", "default"))]
+    req(nrow(row))
+    df <- objectives()
+    for (k in setdiff(names(row), names(df))) df[[k]] <- NA
+    objectives(rbind(df, row[, names(df)]))
+  })
   observeEvent(objectives(), {
     nm <- objectives()$name
     for (id in c("roi_objective", "revenue_objective")) {

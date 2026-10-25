@@ -172,29 +172,46 @@ ls_find_console <- function(repo_root = NULL) {
 ls_fed_species <- c("greater amberjack", "gag", "red grouper", "red snapper",
                     "gray snapper", "lane snapper", "gray triggerfish", "vermilion snapper")
 
-ls_default_objectives <- function() {
+# Objective library: everything a user can add from the app. The defaults (default = TRUE) are a
+# short list of outcomes to increase; the rest are offered in the app's "Add from list" menu.
+ls_objective_library <- function() {
   B <- "Annual_Average_Biomass"; C <- "Annual_Average_Catch"
-  fed <- paste(ls_fed_species, collapse = ", ")
-  main <- data.frame(
-    name         = c("RS_Biomass", "Tot_Biomass", "Fed_Biomass", "RS_Catch", "Tot_Catch", "Fed_Catch",
-                     "Comm_Catch", "Rec_Catch", "Total_Revenue", "Comm_Revenue", "Biodiversity", "Lionfish_Biomass"),
-    file_pattern = c(B, B, B, C, C, C, C, C, C, C, B, B),
-    target       = c("red snapper adult", NA, fed, "red snapper adult", NA, fed, fed, fed, NA, NA, NA, "lionfish"),
-    type         = c("species", "sum", "species", "species", "sum", "species", "species", "species",
-                     "revenue", "revenue", "biodiversity", "species"),
-    direction    = c(rep("max", 11), "min"),
-    weight       = c(1, 0.5, 1, 2, 0.5, 1, 1, 1, 2, 0, 1, 1),
-    fleet        = c(NA, NA, NA, NA, NA, NA, "commercial", "recreational", NA, "commercial", NA, NA),
-    stringsAsFactors = FALSE
+  fed    <- paste(ls_fed_species, collapse = ", ")
+  others <- paste(setdiff(ls_fed_species, "red snapper"), collapse = ", ")
+  o <- function(name, label, file, target, type, direction = "max", fleet = NA, default = FALSE)
+    data.frame(name = name, label = label, file_pattern = file, target = target, type = type,
+               direction = direction, weight = 1, fleet = fleet, default = default, stringsAsFactors = FALSE)
+  lib <- rbind(
+    o("RS_Biomass",        "Red snapper biomass",                         B, "red snapper adult", "species", default = TRUE),
+    o("RS_Catch",          "Red snapper catch",                           C, "red snapper adult", "species", default = TRUE),
+    o("Reef_Fish_Biomass", "Other managed reef fish biomass",             B, others, "species", default = TRUE),
+    o("Total_Revenue",     "Fishery revenue (catch x dockside price)",    C, NA, "revenue", default = TRUE),
+    o("Reef_Fish_Catch",   "Other managed reef fish catch",               C, others, "species"),
+    o("Fed_Biomass",       "All federally managed reef fish biomass",     B, fed, "species"),
+    o("Fed_Catch",         "All federally managed reef fish catch",       C, fed, "species"),
+    o("Comm_Catch",        "Commercial catch of managed reef fish",       C, fed, "species", fleet = "commercial"),
+    o("Rec_Catch",         "Recreational catch of managed reef fish",     C, fed, "species", fleet = "recreational"),
+    o("Comm_Revenue",      "Commercial fishery revenue",                  C, NA, "revenue", fleet = "commercial"),
+    o("Tot_Biomass",       "Total biomass (all groups)",                  B, NA, "sum"),
+    o("Tot_Catch",         "Total catch (all groups)",                    C, NA, "sum"),
+    o("Biodiversity",      "Biodiversity (Shannon index of biomass)",     B, NA, "biodiversity"),
+    o("Lionfish_Biomass",  "Lionfish biomass (invasive; lower is better)", B, "lionfish", "species", direction = "min")
   )
   slug <- gsub("[^A-Za-z0-9]+", "_", tolower(trimws(ls_fed_species)))
-  per_species <- data.frame(
-    name         = c(rbind(paste0("FedSp_", slug, "_Biomass"), paste0("FedSp_", slug, "_Catch"))),
-    file_pattern = rep(c(B, C), length(slug)),
-    target       = rep(ls_fed_species, each = 2),
-    type = "species", direction = "max", weight = 0, fleet = NA, stringsAsFactors = FALSE
-  )
-  rbind(main, per_species)
+  for (k in seq_along(ls_fed_species)) {
+    sp <- ls_fed_species[k]; lab <- paste0(toupper(substring(sp, 1, 1)), substring(sp, 2))
+    lib <- rbind(lib,
+      o(paste0("FedSp_", slug[k], "_Biomass"), paste(lab, "biomass"), B, sp, "species"),
+      o(paste0("FedSp_", slug[k], "_Catch"),   paste(lab, "catch"),   C, sp, "species"))
+  }
+  lib[!duplicated(lib$name), ]
+}
+
+# Default objectives: a short list of positives (red snapper biomass and catch, the other managed reef
+# fish, fishery revenue). More can be added from ls_objective_library() in the app.
+ls_default_objectives <- function() {
+  lib <- ls_objective_library()
+  lib[lib$default, setdiff(names(lib), c("label", "default"))]
 }
 
 # Economics used by "revenue" objectives and the reporting columns (structure_optimization.R econ_params)
@@ -641,6 +658,13 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
   if (is.na(basemap_file)) stop("Basemap not found: ", L$basemap_file)
   template <- rast(basemap_file)
   nr <- nrow(template); nc <- ncol(template)
+  # Maps written for Ecospace keep the header of the Inputs basemap: Ecospace places external layers
+  # by their coordinates on its own grid (NGoM: top-left 31.4647 N, 88.2306 W, so yllcorner 30.2535).
+  # The pristine basemap may carry other coordinates (29.28, the true latitude used for the reef
+  # CSV and the maps shown here); values are always matched by row and column.
+  out_file <- ls_resolve(L$basemap_file, inputs_dir)
+  out_template <- if (!is.na(out_file)) rast(out_file) else template
+  if (nrow(out_template) != nr || ncol(out_template) != nc) out_template <- template
   depth <- values(template, mat = FALSE)
   water <- !is.na(depth) & depth > 0
   xy    <- xyFromCell(template, seq_len(ncell(template)))
@@ -730,7 +754,7 @@ ls_build_problem <- function(cfg, session_dir = NULL, recover = TRUE) {
   P <- list(
     cfg = cfg, session_dir = session_dir, snapshot_dir = snapshot_dir, recovered = recovered,
     pristine_dir = pristine_dir, baseline_csv = baseline_csv,
-    template = template, nr = nr, nc = nc, depth = depth, water = water, xy = xy,
+    template = template, out_template = out_template, nr = nr, nc = nc, depth = depth, water = water, xy = xy,
     cell_area_m2 = cell_area_m2, neighbors = neighbors,
     total_area_km2 = sum(cell_area_m2[!is.na(depth)], na.rm = TRUE) / 1e6,
     layers = used, struct_file = struct_file, natural = natural,
@@ -977,7 +1001,7 @@ ls_cleanup_aux <- function(asc_path) {
 }
 
 ls_write_asc <- function(P, vals, path) {
-  r <- rast(P$template)
+  r <- rast(if (is.null(P$out_template)) P$template else P$out_template)
   values(r) <- vals
   # Write to a temp dir and copy only the .asc so no sidecar files land next to the target
   tmp <- file.path(tempdir(), basename(path))
@@ -1227,7 +1251,9 @@ ls_score <- function(df, objectives, area_km2 = 1, econ = ls_default_econ(), roi
     rel <- if (is.finite(b)) { if (b != 0) (v - b) / b else (v - b) } else rep(NA_real_, nrow(df))
     df[[paste0(obj$name, "_vs_status_quo_pct")]] <- 100 * rel
     w <- ls_num(obj$weight, 1)
-    comp <- comp + ifelse(is.na(rel), 0, rel * w * (if (obj$direction == "min") -1 else 1))
+    # Each objective adds at most +/-100% x weight, so one whose status quo is near zero (e.g.
+    # lionfish) cannot swamp the rest; the _vs_status_quo_pct columns keep the full change
+    comp <- comp + ifelse(is.na(rel), 0, pmax(-1, pmin(1, rel)) * w * (if (obj$direction == "min") -1 else 1))
     gain <- if (is.finite(b)) v - b else rep(NA_real_, nrow(df))
     if (obj$type %in% c("species", "sum")) df[[paste0("Net_", obj$name, "_Gain_Lbs")]] <- round(gain * area_km2 * lbs, 2)
     if (obj$type == "revenue") df[[paste0("Net_", obj$name, "_Gain_USD")]] <- round(gain, 2)
@@ -1430,7 +1456,7 @@ ls_start_job <- function(S, job) {
   vals <- c(setNames(list(job$layers$structure), cfg$layers$structure_layer), job$layers$habitats)
   for (nm in names(job$map_files)) {
     target <- S$targets[[nm]]
-    r <- rast(P$template)
+    r <- rast(if (is.null(P$out_template)) P$template else P$out_template)
     values(r) <- vals[[nm]]
     ok <- tryCatch({
       suppressWarnings(writeRaster(r, target, filetype = "AAIGrid", overwrite = TRUE, NAflag = -9999))
@@ -1560,6 +1586,25 @@ ls_alert <- function(S, msg, key = msg) {
   }
 }
 
+# Ecospace places external layers on its grid by their coordinates. Compare the header of the maps the
+# solver writes with the grid in the spatial log (MapLatitude = top edge, MapLongitude = left edge)
+ls_check_grid <- function(S, log_lines) {
+  if (isTRUE(S$grid_checked)) return(invisible())
+  val <- function(k) suppressWarnings(as.numeric(sub(paste0("^", k, ","), "", grep(paste0("^", k, ","), log_lines, value = TRUE)[1])))
+  top <- val("MapLatitude"); left <- val("MapLongitude"); cs <- val("MapCellSize")
+  if (any(is.na(c(top, left, cs)))) return(invisible())
+  S$grid_checked <- TRUE
+  g <- if (is.null(S$P$out_template)) S$P$template else S$P$out_template
+  e <- as.vector(ext(g))
+  if (abs(e[4] - top) > cs / 2 || abs(e[1] - left) > cs / 2) {
+    ls_alert(S, sprintf(paste("The maps' coordinates (top %.4f, left %.4f) do not line up with the Ecospace grid (top %.4f, left %.4f).",
+                              "Ecospace places the layers by coordinates, so scenarios may not change its inputs.",
+                              "Give the Inputs basemap.asc the header of the model's grid."), e[4], e[1], top, left), key = "grid")
+  } else {
+    ls_log(S, sprintf("Map coordinates match the Ecospace grid (top %.4f, left %.4f).", top, left))
+  }
+}
+
 ls_check_run <- function(S, job, obj) {
   norm_path <- function(x) tolower(gsub("\\\\", "/", x))
   log <- S$spatiallog
@@ -1568,6 +1613,7 @@ ls_check_run <- function(S, job, obj) {
     file.copy(log, file.path(job$run_dir, "spatiallog.txt"), overwrite = TRUE)
     log_lines <- readLines(log, warn = FALSE)
     loaded <- unique(sub(".*Loaded data from '(.*)'.*", "\\1", grep("Loaded data from '", log_lines, value = TRUE)))
+    ls_check_grid(S, log_lines)
     # Ecospace reports cached layers as "Loaded from cache" even when it filled the cache from the
     # maps during this run. The run is stale only if a cache entry for this model could not be deleted
     # beforehand (for example because another program had it open) and Ecospace did not rewrite it.
