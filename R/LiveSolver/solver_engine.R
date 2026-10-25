@@ -212,7 +212,7 @@ ls_default_econ <- function() {
   )
 }
 
-# Machine-specific settings (console and cache locations) remembered between sessions
+# Machine-specific settings (console location) remembered between sessions
 ls_settings_file <- function(repo_root) file.path(repo_root, "LiveSolver_settings.json")
 
 ls_read_settings <- function(repo_root) {
@@ -222,7 +222,7 @@ ls_read_settings <- function(repo_root) {
 }
 
 ls_save_settings <- function(repo_root, cfg) {
-  tryCatch(write_json(list(console_path = cfg$model$console_path, cache_dir = cfg$model$cache_dir %||% ""),
+  tryCatch(write_json(list(console_path = cfg$model$console_path),
                       ls_settings_file(repo_root), auto_unbox = TRUE, pretty = TRUE),
            error = function(e) NULL)
 }
@@ -274,7 +274,6 @@ ls_default_config <- function(repo_root) {
       run,              # scenario indices, years, spin-up, time steps, threads (template values)
       list(
       timeout_sec       = 1800,
-      cache_dir         = saved$cache_dir %||% "",  # Ecospace's spatial data cache folder, emptied before every run
       extra_tags        = ""      # raw command-file lines appended verbatim (e.g. vulnerabilities)
     )),
     layers = list(
@@ -1233,10 +1232,11 @@ ls_new_session <- function(cfg, repo_root) {
     S$stconfig <- ls_write_stconfig(stc, S$targets, stc)
     S$spatiallog <- file.path(dirname(cfg$model$model_file),
                               paste0(sub("\\.eweaccdb$", "", basename(cfg$model$model_file)), "_spatiallog.txt"))
-    cd <- cfg$model$cache_dir %||% ""
-    ls_check_cache_dir(cd, cfg)
-    ls_log(S, if (nzchar(cd)) sprintf("Ecospace spatial cache folder: %s (emptied before every run)", cd) else
-      "No Ecospace spatial cache folder set; if Ecospace loads layers from its cache, the session stops and says so.")
+    S$guids <- S$P$layers$guid[!is.na(S$P$layers$guid)]
+    roots <- ls_ewe_cache_roots()
+    ls_log(S, if (length(roots)) paste("Ecospace spatial cache:", paste(roots, collapse = "; "),
+                                       "- this model's layers are cleared from it before every run") else
+      "No Ecospace spatial cache yet; it is looked for again (and cleared) before every run.")
   }
   S$alerts <- character()
   S$alert_keys <- character()
@@ -1345,8 +1345,9 @@ ls_start_job <- function(S, job) {
     }
   }
   # Ecospace caches converted habitat layers and reuses them instead of re-reading the files
-  cd <- cfg$model$cache_dir %||% ""
-  if (nzchar(cd) && dir.exists(cd)) unlink(list.files(cd, full.names = TRUE, all.files = TRUE, no.. = TRUE), recursive = TRUE, force = TRUE)
+  ls_clear_ewe_cache(S$guids)
+  left <- list.files(ls_ewe_cache_dirs(S$guids), recursive = TRUE, full.names = TRUE)   # could not be deleted
+  job$cache_left <- setNames(as.numeric(file.mtime(left)), left)
   cmd <- ls_write_cmd(P, job$run_dir, S$stconfig)
 
   console <- cfg$model$console_path
@@ -1428,22 +1429,28 @@ ls_finish_job <- function(S, job) {
   invisible(row)
 }
 
-# A user-entered cache folder is emptied before every run, so refuse anything that looks like a
-# general-purpose folder or that holds the model, inputs or the Live Solver itself
-ls_check_cache_dir <- function(cd, cfg) {
-  if (!nzchar(cd)) return(invisible(TRUE))
-  if (!dir.exists(cd)) stop("The Ecospace spatial cache folder does not exist: ", cd)
-  np <- function(x) tolower(sub("/+$", "", normalizePath(x, winslash = "/", mustWork = FALSE)))
-  c0 <- np(cd)
-  home <- Sys.getenv(c("USERPROFILE", "HOME", "LOCALAPPDATA", "APPDATA", "TEMP", "TMP", "PROGRAMFILES"))
-  home <- home[nzchar(home)]
-  protected <- np(c(home, file.path(home, "Documents"), file.path(home, "Desktop"), file.path(home, "Downloads")))
-  keep <- np(c(cfg$model$model_file, cfg$model$inputs_dir, cfg$model$console_path, getwd()))
-  if (grepl("^[a-z]:$|^$", c0) || c0 %in% protected || any(startsWith(paste0(keep, "/"), paste0(c0, "/")))) {
-    stop("Refusing to use '", cd, "' as the Ecospace spatial cache folder: its contents are deleted before every run, ",
-         "and this looks like a general folder or contains the model or the Live Solver. Choose the cache folder itself.")
-  }
-  invisible(TRUE)
+# Ecospace's spatial data cache (EwECore cSpatialDataCache): converted copies of each external
+# layer under %APPDATA%\<console product name>\Cache\Spatial\<dataset GUID>\..., keyed only by
+# GUID, extent, cell size and date. A rewritten map file never invalidates it, so the solver deletes
+# this model's GUID folders before every run and Ecospace has to read the maps again.
+ls_ewe_cache_roots <- function() {
+  base <- Sys.getenv(c("APPDATA", "LOCALAPPDATA"))
+  base <- unique(base[nzchar(base) & dir.exists(base)])
+  roots <- file.path(unlist(lapply(base, list.dirs, recursive = FALSE, full.names = TRUE)), "Cache", "Spatial")
+  roots[dir.exists(roots)]
+}
+
+ls_ewe_cache_dirs <- function(guids) {
+  roots <- ls_ewe_cache_roots()
+  if (!length(roots) || !length(guids)) return(character())
+  d <- as.vector(outer(roots, guids, file.path))
+  d[dir.exists(d)]
+}
+
+ls_clear_ewe_cache <- function(guids) {
+  d <- ls_ewe_cache_dirs(guids)
+  unlink(d, recursive = TRUE, force = TRUE)
+  invisible(d)
 }
 
 # Diagnostics after a real run: did Ecospace read this run's structure map, and did anything change?
@@ -1464,23 +1471,24 @@ ls_check_run <- function(S, job, obj) {
     file.copy(log, file.path(job$run_dir, "spatiallog.txt"), overwrite = TRUE)
     log_lines <- readLines(log, warn = FALSE)
     loaded <- unique(sub(".*Loaded data from '(.*)'.*", "\\1", grep("Loaded data from '", log_lines, value = TRUE)))
-    if (any(grepl("Loaded from cache", log_lines, fixed = TRUE))) {
-      # This run used cached layers, not the solver's maps: never score it
+    # Ecospace reports cached layers as "Loaded from cache" even when it filled the cache from the
+    # maps during this run. The run is stale only if a cache entry for this model could not be deleted
+    # beforehand (for example because another program had it open) and Ecospace did not rewrite it.
+    cached <- list.files(ls_ewe_cache_dirs(S$guids), recursive = TRUE, full.names = TRUE)
+    left   <- job$cache_left %||% numeric()
+    stale  <- cached[cached %in% names(left) & as.numeric(file.mtime(cached)) <= left[cached]]
+    if (length(stale)) {
       S$results$kind[S$results$run == job$run] <- "probe"
-      cd <- S$cfg$model$cache_dir %||% ""
-      ls_alert(S, sprintf("%s: Ecospace loaded the habitat maps from its spatial data cache instead of the files the solver wrote, so this run is not scored. %s",
-                          job$run, if (nzchar(cd)) {
-                            sprintf("The folder set as the cache (%s) was emptied before the run, so Ecospace's cache must be somewhere else.", cd)
-                          } else {
-                            "Set 'Ecospace spatial cache folder' on the Start here tab (it shows how to find the folder) and start again."
-                          }), key = "cache")
+      ls_alert(S, sprintf("%s: Ecospace reused cached habitat layers from %s that the solver could not delete (is Ecospace or another program open?), so this run is not scored.",
+                          job$run, dirname(stale[1])), key = "cache")
       # Every later run would read the same cache, so stop rather than produce identical scenarios
       if (job$kind == "baseline_none") {
         S$total_runs <- S$i
-        ls_log(S, "Stopped: the status quo run was served from Ecospace's cache.")
+        ls_log(S, "Stopped: the status quo run read stale cached layers. Close other Ecospace programs and start again.")
       }
       return(invisible())
     }
+    if (length(cached)) ls_log(S, sprintf("%s: Ecospace cached this run's layers afresh (%d file(s)).", job$run, length(cached)))
   } else {
     ls_alert(S, sprintf("%s: Ecospace wrote no spatial log (%s), so the solver cannot confirm which maps it read.", job$run, log),
              key = "no_spatiallog")

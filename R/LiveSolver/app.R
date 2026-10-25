@@ -64,9 +64,6 @@ ui <- page_navbar(
           "Ecospace console", span(class = "small text-muted", paste("Version", ls_version()))),
         textInput("console_path", "Location of EwEClientConsole.exe", defaults$model$console_path, width = "100%"),
         uiOutput("console_status"),
-        textInput("cache_dir", "Ecospace spatial cache folder", defaults$model$cache_dir, width = "100%",
-                  placeholder = "Folder where Ecospace caches habitat layers; emptied before every run"),
-        uiOutput("cache_help"),
         p(class = "small",
           "Real scenarios need the Ecospace console installed on this Windows computer. Without it you can",
           "still try everything in ", strong("test mode"), ", which uses made-up scores so you can learn the tool."),
@@ -350,24 +347,6 @@ server <- function(input, output, session) {
   })
   region <- reactive(ls_region_info(model_row()$inputs_dir))
 
-  # How to find Ecospace's cache once: search for the structure layer's dataset ID from the STConfig
-  output$cache_help <- renderUI({
-    lyr <- region()$layers
-    guid <- lyr$guid[lyr$name == (input$structure_layer %||% "")]
-    if (!length(guid) || is.na(guid[1])) guid <- lyr$guid[1]
-    tags$details(class = "small mb-2",
-      tags$summary("How to find this folder (one time)"),
-      p("Ecospace keeps copies of habitat layers in a cache and may reuse them instead of the maps the solver writes.",
-        "Its spatial log then says 'Loaded from cache' and every scenario looks like the status quo.",
-        "To find the cache, run this in PowerShell and enter the folder that holds the result:"),
-      tags$pre(style = "white-space:pre-wrap", sprintf(paste0(
-        "Get-ChildItem $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP, \"$env:USERPROFILE\\Documents\", ",
-        "\"C:\\Program Files\\EcoSpace Console*\" -Recurse -ErrorAction SilentlyContinue |\n",
-        "  Where-Object { $_.Name -like \"*%s*\" } | Select-Object FullName"), guid[1])),
-      p("The folder is remembered on this computer. Its contents are deleted before every run, so choose the cache folder itself;",
-        "general folders and folders that contain the model or the Live Solver are refused."))
-  })
-
   output$console_status <- renderUI({
     if (file.exists(input$console_path)) {
       div(class = "alert alert-success py-2", icon("check"), "Console found. Real Ecospace scenarios are available.")
@@ -512,7 +491,6 @@ server <- function(input, output, session) {
       model = list(
         region = m$region, model_file = m$model_file, inputs_dir = m$inputs_dir,
         stconfig = info$stconfig, cmd_template = info$cmd_template, console_path = input$console_path,
-        cache_dir = input$cache_dir %||% "",
         ecosim_scenario = nv("ecosim_scenario", defaults$model$ecosim_scenario), ecospace_scenario = nv("ecospace_scenario", defaults$model$ecospace_scenario),
         n_years = nv("n_years", defaults$model$n_years), use_spinup = input$use_spinup, spinup_years = nv("spinup_years", defaults$model$spinup_years),
         timesteps_year = nv("timesteps_year", defaults$model$timesteps_year), n_threads = nv("n_threads", defaults$model$n_threads), timeout_sec = nv("timeout_sec", defaults$model$timeout_sec),
@@ -598,7 +576,6 @@ server <- function(input, output, session) {
     updateSelectInput(session, "inst_displacement", selected = I$displacement)
     updateSelectInput(session, "dec_selection", selected = D$selection)
     updateTextInput(session, "console_path", value = M$console_path)
-    updateTextInput(session, "cache_dir", value = M$cache_dir %||% "")
     updateTextAreaInput(session, "extra_tags", value = M$extra_tags %||% "")
     objectives(cfg$objectives)
     if (!is.null(cfg$econ$prices)) prices(as.data.frame(cfg$econ$prices, stringsAsFactors = FALSE))
@@ -689,7 +666,7 @@ server <- function(input, output, session) {
       showNotification("Ecospace console not found. Set its location on the Start here tab, or switch on test mode.", type = "error"); return()
     }
     if (!nrow(cfg$objectives)) { showNotification("Define at least one objective.", type = "error"); return() }
-    showNotification("Starting: preparing maps and checking Ecospace's cache...", id = "starting", duration = NULL)
+    showNotification("Starting: preparing maps...", id = "starting", duration = NULL)
     S <- tryCatch(ls_new_session(cfg, repo_root), error = function(e) {
       message("Could not start: ", conditionMessage(e))
       showNotification(paste("Could not start:", conditionMessage(e)), type = "error", duration = NULL); NULL
