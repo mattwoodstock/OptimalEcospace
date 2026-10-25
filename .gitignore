@@ -3,7 +3,8 @@
 .RData
 .Ruserdata
 ../Inputs/dbSeaBed
-.data/dbSeaBedOutputs/
+.data/dbSeaBed
+Outputs/
 .livesolver_lock
 dist/
 R/LiveSolver/VERSION

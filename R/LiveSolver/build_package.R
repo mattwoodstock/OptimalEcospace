@@ -46,7 +46,10 @@ for (reg in list.dirs(file.path(repo_root, "Inputs"), full.names = FALSE, recurs
   maps <- c(info$layers$file[info$layers$exists],
             file.path(inputs_dir, c(defaults$layers$basemap_file,
                                     defaults$install$exclusions_file,
-                                    defaults$install$cost_map_file)))
+                                    defaults$decom$cost_map_file)))
+  # Pristine copies of the habitat layers ("Initial Base Mapps"), read before every scenario
+  pdir <- ls_pristine_dir(inputs_dir, "auto")
+  if (!is.null(pdir)) maps <- c(maps, file.path(pdir, basename(info$layers$file)))
   maps <- maps[file.exists(maps)]
   files <- c(files, model_rel, rel(info$stconfig), rel(info$cmd_template), vapply(maps, rel, ""))
 }
@@ -66,7 +69,7 @@ writeLines(sprintf("%s (built %s)", substr(sha[1], 1, 7), format(Sys.time(), "%Y
            file.path(stage, "R/LiveSolver/VERSION"))
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-zip_path <- normalizePath(file.path(out_dir, paste0(pkg_name, ".zip")), winslash = "/", mustWork = FALSE)
+zip_path <- file.path(normalizePath(out_dir, winslash = "/"), paste0(pkg_name, ".zip"))
 unlink(zip_path)
 if (nzchar(Sys.which("zip"))) {
   old <- setwd(dirname(stage))
