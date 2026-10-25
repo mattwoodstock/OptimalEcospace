@@ -315,6 +315,9 @@ ls_default_config <- function(repo_root) {
     # Reef modules (structure_optimization.R reef_params): standard prefab concrete modules
     install = list(
       budget                = 6000000, # each scenario draws a random budget up to this (USD)
+      budget_min            = NA,      # smallest budget drawn (blank = the cost of one module)
+      budget_sampling       = "uniform", # uniform | low (favour smaller budgets) | log (log-uniform)
+      budget_skew           = 2,       # "low" only: 1 = uniform; higher = smaller budgets more often
       unit_cost             = 2500,    # deployed cost per module (USD)
       depth_cost_factor     = 0,       # > 0 makes deeper deployment cost more per module
       ref_depth_m           = 30,      # reference depth for the depth cost factor
@@ -789,7 +792,10 @@ ls_problem_summary <- function(P) {
       if (any(P$struct0 > 0)) paste(ls_pct(min(P$struct0[P$struct0 > 0])), "-", ls_pct(max(P$struct0))) else "-",
       length(P$install_valid),
       rng(uc, ls_usd), rng(pmin(1, uf), ls_pct),
-      paste("random, up to", ls_usd(ls_num(I$budget, 0))),
+      sprintf("random, %s to %s%s", ls_usd(max(ls_num(I$budget_min, 0), if (length(uc)) min(uc) else 0)),
+              ls_usd(ls_num(I$budget, 0)),
+              switch(I$budget_sampling %||% "uniform", low = sprintf(" (favouring smaller budgets, strength %g)", ls_num(I$budget_skew, 2)),
+                     log = " (log-uniform: each tenfold range equally likely)", "")),
       length(P$decom_eligible), rng(dc, ls_usd)
     ),
     stringsAsFactors = FALSE
@@ -802,6 +808,18 @@ ls_affordable <- function(cost, budget) sum(cumsum(sort(cost)) <= budget)
 
 # Modules allocated as random batch drops until a randomly drawn budget is spent
 # (structure_optimization.R batch-stacking loop). `initial` = modules kept from a parent run.
+# A scenario's budget between lo and hi: uniform; "low" = lo + (hi - lo) * U^skew (skew > 1 draws small
+# budgets more often; 2 puts a quarter of scenarios in the bottom 6% of the range); "log" = log-uniform
+# (each tenfold range of budgets equally likely)
+ls_draw_budget <- function(lo, hi, sampling = "uniform", skew = 2) {
+  if (!is.finite(hi) || hi <= lo) return(lo)
+  u <- stats::runif(1)
+  switch(sampling,
+    low = lo + (hi - lo) * u^max(1, skew),
+    log = if (lo > 0) exp(log(lo) + u * (log(hi) - log(lo))) else lo + (hi - lo) * u,
+    lo + (hi - lo) * u)
+}
+
 ls_gen_modules <- function(P, budget_limit, initial = NULL) {
   I <- P$cfg$install
   n <- length(P$depth)
@@ -827,7 +845,9 @@ ls_gen_modules <- function(P, budget_limit, initial = NULL) {
   min_site <- min(uc[valid])
   lo <- max(spent, min_site)
   hi <- max(max(budget_limit, min_site), lo)
-  run_budget <- stats::runif(1, lo, hi)
+  bmin <- ls_num(I$budget_min, NA)
+  if (is.finite(bmin)) lo <- min(hi, max(lo, bmin))
+  run_budget <- ls_draw_budget(lo, hi, I$budget_sampling %||% "uniform", ls_num(I$budget_skew, 2))
 
   weights <- rep(1, n)
   if (connect && !is.null(initial)) {
