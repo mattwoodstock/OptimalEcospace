@@ -100,6 +100,9 @@ ui <- page_navbar(
           selectInput("natural_habitats", "Natural habitat layers displaced / restored", choices = NULL, multiple = TRUE),
           selectInput("basemap_file", "Basemap (depth)", choices = NULL),
           selectInput("existing_file", "Existing structures map", choices = NULL),
+          radioButtons("reef_baseline", "Existing reefs", c(
+            "Automatic: from reeflocations.csv when present (reef halos; Alabama zone gets the mean cover)" = "auto",
+            "From the structure map" = "map")),
           radioButtons("existing_cover", "Cover of each existing structure cell", c(
             "Automatic: keep fractional maps; presence (0/1) maps get one module's cover" = "auto",
             "As stored in the map" = "as_mapped",
@@ -499,7 +502,9 @@ server <- function(input, output, session) {
       layers = list(
         structure_layer = input$structure_layer, existing_file = input$existing_file,
         natural_habitats = input$natural_habitats %||% character(), basemap_file = input$basemap_file,
-        pristine_source = input$pristine_source %||% "auto", existing_cover = input$existing_cover %||% "auto"
+        pristine_source = input$pristine_source %||% "auto", existing_cover = input$existing_cover %||% "auto",
+        reef_baseline = input$reef_baseline %||% "auto", baseline_fill_map = defaults$layers$baseline_fill_map,
+        baseline_fill_cols = defaults$layers$baseline_fill_cols
       ),
       strategy = list(type = input$strategy_type, shared_budget = input$shared_budget),
       install = list(
@@ -570,6 +575,7 @@ server <- function(input, output, session) {
                 dry_run = Se$dry_run)
     for (id in names(checks)) updateCheckboxInput(session, id, value = isTRUE(checks[[id]]))
     radios <- c(pristine_source = cfg$layers$pristine_source %||% "auto", existing_cover = cfg$layers$existing_cover %||% "auto",
+                reef_baseline = cfg$layers$reef_baseline %||% "auto",
                 strategy_type = cfg$strategy$type, dec_cost_source = D$cost_source,
                 algorithm = Se$algorithm)
     for (id in names(radios)) updateRadioButtons(session, id, selected = radios[[id]])
