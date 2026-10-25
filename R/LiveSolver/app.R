@@ -71,8 +71,9 @@ ui <- page_navbar(
           "Ecospace console", span(class = "small text-muted", paste("Version", ls_version()))),
         textInput("console_path", "Location of EwEClientConsole.exe", defaults$model$console_path, width = "100%"),
         uiOutput("console_status"),
-        textInput("cache_dir", "Ecospace spatial cache folder (optional)", defaults$model$cache_dir, width = "100%",
-                  placeholder = "Found automatically when possible; its contents are deleted before every run"),
+        textInput("cache_dir", "Ecospace spatial cache folder", defaults$model$cache_dir, width = "100%",
+                  placeholder = "Folder where Ecospace caches habitat layers; emptied before every run"),
+        uiOutput("cache_help"),
         p(class = "small",
           "Real scenarios need the Ecospace console installed on this Windows computer. Without it you can",
           "still try everything in ", strong("test mode"), ", which uses made-up scores so you can learn the tool."),
@@ -336,6 +337,24 @@ server <- function(input, output, session) {
     models[models$key == input$model, ]
   })
   region <- reactive(ls_region_info(model_row()$inputs_dir))
+
+  # How to find Ecospace's cache once: search for the structure layer's dataset ID from the STConfig
+  output$cache_help <- renderUI({
+    lyr <- region()$layers
+    guid <- lyr$guid[lyr$name == (input$structure_layer %||% "")]
+    if (!length(guid) || is.na(guid[1])) guid <- lyr$guid[1]
+    tags$details(class = "small mb-2",
+      tags$summary("How to find this folder (one time)"),
+      p("Ecospace keeps copies of habitat layers in a cache and may reuse them instead of the maps the solver writes.",
+        "Its spatial log then says 'Loaded from cache' and every scenario looks like the status quo.",
+        "To find the cache, run this in PowerShell and enter the folder that holds the result:"),
+      tags$pre(style = "white-space:pre-wrap", sprintf(paste0(
+        "Get-ChildItem $env:LOCALAPPDATA, $env:APPDATA, $env:TEMP, \"$env:USERPROFILE\\Documents\", ",
+        "\"C:\\Program Files\\EcoSpace Console*\" -Recurse -ErrorAction SilentlyContinue |\n",
+        "  Where-Object { $_.Name -like \"*%s*\" } | Select-Object FullName"), guid[1])),
+      p("The folder is remembered on this computer. Its contents are deleted before every run, so choose the cache folder itself;",
+        "general folders and folders that contain the model or the Live Solver are refused."))
+  })
 
   output$console_status <- renderUI({
     if (file.exists(input$console_path)) {

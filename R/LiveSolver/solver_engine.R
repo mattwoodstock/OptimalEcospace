@@ -179,6 +179,21 @@ ls_default_objectives <- function() {
   )
 }
 
+# Machine-specific settings (console and cache locations) remembered between sessions
+ls_settings_file <- function(repo_root) file.path(repo_root, "LiveSolver_settings.json")
+
+ls_read_settings <- function(repo_root) {
+  f <- ls_settings_file(repo_root)
+  if (!file.exists(f)) return(list())
+  tryCatch(fromJSON(f), error = function(e) list())
+}
+
+ls_save_settings <- function(repo_root, cfg) {
+  tryCatch(write_json(list(console_path = cfg$model$console_path, cache_dir = cfg$model$cache_dir %||% ""),
+                      ls_settings_file(repo_root), auto_unbox = TRUE, pretty = TRUE),
+           error = function(e) NULL)
+}
+
 ls_default_config <- function(repo_root) {
   models <- ls_discover_models(repo_root)
   m      <- if (nrow(models)) models[1, ] else NULL
@@ -188,7 +203,8 @@ ls_default_config <- function(repo_root) {
     hit <- grep("struct|reef", lyr$name, ignore.case = TRUE, value = TRUE)
     if (length(hit)) hit[1] else lyr$name[1]
   } else NA_character_
-  console <- ls_find_console(repo_root)
+  saved   <- ls_read_settings(repo_root)
+  console <- if (!is.null(saved$console_path) && file.exists(saved$console_path)) saved$console_path else ls_find_console(repo_root)
 
   list(
     model = list(
@@ -206,7 +222,7 @@ ls_default_config <- function(repo_root) {
       timesteps_year    = 12,
       n_threads         = 15,
       timeout_sec       = 1800,
-      cache_dir         = "",     # optional: Ecospace's spatial data cache folder, emptied before every run
+      cache_dir         = saved$cache_dir %||% "",  # Ecospace's spatial data cache folder, emptied before every run
       extra_tags        = ""      # raw command-file lines appended verbatim (e.g. vulnerabilities)
     ),
     layers = list(
@@ -950,6 +966,7 @@ ls_new_session <- function(cfg, repo_root) {
   }, add = TRUE)
   S$P <- ls_build_problem(cfg, S$session_dir)
   ls_save_config(cfg, file.path(S$session_dir, "solver_config.json"))
+  if (!isTRUE(cfg$search$dry_run)) ls_save_settings(repo_root, cfg)
 
   S$total_runs <- round(ls_num(cfg$search$iterations, 100)) + 1   # + the status quo run
   S$i       <- 0
@@ -974,11 +991,10 @@ ls_new_session <- function(cfg, repo_root) {
     S$stconfig <- ls_write_stconfig(stc, S$targets, stc)
     S$spatiallog <- file.path(dirname(cfg$model$model_file),
                               paste0(sub("\\.eweaccdb$", "", basename(cfg$model$model_file)), "_spatiallog.txt"))
-    ls_check_cache_dir(cfg$model$cache_dir %||% "", cfg)
-    S$cache_paths <- ls_safe_cache_search(S)
-    ls_log(S, if (length(S$cache_paths)) {
-      sprintf("Ecospace spatial data cache for these layers: %s (cleared before every run)", paste(unique(dirname(S$cache_paths)), collapse = "; "))
-    } else "No Ecospace spatial data cache found for these layers yet.")
+    cd <- cfg$model$cache_dir %||% ""
+    ls_check_cache_dir(cd, cfg)
+    ls_log(S, if (nzchar(cd)) sprintf("Ecospace spatial cache folder: %s (emptied before every run)", cd) else
+      "No Ecospace spatial cache folder set; if Ecospace loads layers from its cache, the session stops and says so.")
   }
   S$alerts <- character()
   S$alert_keys <- character()
@@ -1059,7 +1075,6 @@ ls_start_job <- function(S, job) {
     }
   }
   # Ecospace caches converted habitat layers and reuses them instead of re-reading the files
-  if (length(S$cache_paths)) unlink(S$cache_paths, recursive = TRUE, force = TRUE)
   cd <- cfg$model$cache_dir %||% ""
   if (nzchar(cd) && dir.exists(cd)) unlink(list.files(cd, full.names = TRUE, all.files = TRUE, no.. = TRUE), recursive = TRUE, force = TRUE)
   cmd <- ls_write_cmd(P, job$run_dir, S$stconfig)
@@ -1157,59 +1172,6 @@ ls_check_cache_dir <- function(cd, cfg) {
   invisible(TRUE)
 }
 
-# The cache search is a convenience: a failure is logged, never fatal
-ls_safe_cache_search <- function(S) {
-  t0 <- Sys.time()
-  out <- tryCatch(suppressWarnings(ls_find_spatial_cache(S$P$layers$guid, ls_cache_roots(S$cfg))),
-                  error = function(e) { ls_log(S, paste("Cache search skipped:", conditionMessage(e))); character() })
-  ls_log(S, sprintf("Cache search took %.1f s", as.numeric(difftime(Sys.time(), t0, units = "secs"))))
-  out
-}
-
-# Folders searched for cache entries besides the user's AppData/Temp: next to the model, inputs and
-# package, and the console's install folder
-ls_cache_roots <- function(cfg) {
-  m <- cfg$model
-  unique(c(dirname(m$model_file), m$inputs_dir, dirname(dirname(dirname(m$model_file))), dirname(m$console_path)))
-}
-
-# Ecospace's spatial-temporal framework keeps a cache of converted layers, filed under each dataset's
-# GUID from the STConfig. Look for cache entries named after these GUIDs in the usual places: next to
-# the model and inputs, and in EwE-related folders under the user's AppData and Temp folders.
-ls_find_spatial_cache <- function(guids, local_roots = character()) {
-  guids <- tolower(guids[!is.na(guids) & nzchar(guids)])
-  if (!length(guids)) return(character())
-  sys_roots <- unique(c(Sys.getenv(c("LOCALAPPDATA", "APPDATA", "TEMP", "TMP")),
-                        file.path(Sys.getenv("USERPROFILE"), "Documents")))
-  sys_roots <- sys_roots[nzchar(sys_roots) & dir.exists(sys_roots)]
-  ewe_dirs <- as.character(unlist(lapply(sys_roots, function(r) {
-    d <- list.dirs(r, recursive = FALSE)
-    d[grepl("ecopath|ewe|ecospace|spatial", iconv(basename(d), "", "ASCII", sub = ""), ignore.case = TRUE) %in% TRUE]
-  })))
-  roots <- unique(c(local_roots[dir.exists(local_roots)], ewe_dirs))
-  # Loose cache entries directly in AppData / Temp
-  # Names are reduced to ASCII first: GUIDs are ASCII, and odd file names elsewhere must not break the search
-  matches <- function(paths) {
-    if (!length(paths)) return(logical())
-    b <- tolower(iconv(basename(paths), "", "ASCII", sub = ""))
-    b[is.na(b)] <- ""
-    Reduce(`|`, lapply(guids, function(g) grepl(g, b, fixed = TRUE, useBytes = TRUE)))
-  }
-  top <- as.character(unlist(lapply(sys_roots, list.files, full.names = TRUE, include.dirs = TRUE)))
-  hits <- top[matches(top)]
-  for (r in roots) {
-    paths <- c(list.dirs(r, recursive = TRUE), list.files(r, recursive = TRUE, full.names = TRUE))
-    hits <- c(hits, paths[matches(paths)])
-  }
-  # Keep the outermost matches (deleting a folder removes its contents)
-  hits <- unique(normalizePath(hits, winslash = "/", mustWork = FALSE))
-  inside_other <- function(h) {
-    others <- setdiff(hits, h)
-    length(others) > 0 && any(startsWith(h, paste0(others, "/")))
-  }
-  hits[!vapply(hits, inside_other, logical(1))]
-}
-
 # Diagnostics after a real run: did Ecospace read this run's structure map, and did anything change?
 # Logged every time; shown in the app once per kind of problem
 ls_alert <- function(S, msg, key = msg) {
@@ -1231,23 +1193,17 @@ ls_check_run <- function(S, job, obj) {
     if (any(grepl("Loaded from cache", log_lines, fixed = TRUE))) {
       # This run used cached layers, not the solver's maps: never score it
       S$results$kind[S$results$run == job$run] <- "probe"
-      before <- length(S$cache_paths)
-      if (!before) {
-        S$cache_paths <- ls_safe_cache_search(S)
-      }
-      found_now <- !before && length(S$cache_paths)
-      if (nzchar(S$cfg$model$cache_dir %||% "")) found_now <- FALSE
+      cd <- S$cfg$model$cache_dir %||% ""
       ls_alert(S, sprintf("%s: Ecospace loaded the habitat maps from its spatial data cache instead of the files the solver wrote, so this run is not scored. %s",
-                          job$run, if (found_now) {
-                            sprintf("Found the cache at %s; it is now cleared before every run.", paste(unique(dirname(S$cache_paths)), collapse = "; "))
-                          } else if (before) {
-                            "The solver clears the cache entries it found, but Ecospace still used a cache somewhere else; see the README."
+                          job$run, if (nzchar(cd)) {
+                            sprintf("The folder set as the cache (%s) was emptied before the run, so Ecospace's cache must be somewhere else.", cd)
                           } else {
-                            "The solver could not find that cache. Enter its folder under 'Ecospace spatial cache folder' on the Start here tab (the README shows how to find it)."
-                          }), key = if (found_now) "cache_found" else "cache")
-      if (job$kind == "baseline_none" && found_now) {
-        S$redo_status_quo <- TRUE
-        S$total_runs <- S$total_runs + 1
+                            "Set 'Ecospace spatial cache folder' on the Start here tab (it shows how to find the folder) and start again."
+                          }), key = "cache")
+      # Every later run would read the same cache, so stop rather than produce identical scenarios
+      if (job$kind == "baseline_none") {
+        S$total_runs <- S$i
+        ls_log(S, "Stopped: the status quo run was served from Ecospace's cache.")
       }
       return(invisible())
     }

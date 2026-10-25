@@ -7,3 +7,4 @@
 .livesolver_lock
 dist/
 R/LiveSolver/VERSION
+LiveSolver_settings.json
