@@ -1,6 +1,6 @@
 # Live Solver
 
-An interactive (Shiny) front end for the OptimalEcospace optimization loop. It follows the same process as `structure_optimization.R` (reef modules, random budgets, natural habitat making room for reef, objectives scored against the status quo), so a non-modeller can run it from a browser. You pick an existing Ecospace model in this repository, set the constraints for an artificial-structure **installation**, **decommissioning**, or **mixed** strategy, and the solver runs Ecospace scenario after scenario. Scores, the cost frontier and the best layout update after every run.
+An interactive (Shiny) front end for the OptimalEcospace optimization loop. It follows the same process as `structure_optimization.R` (reef modules, random budgets, natural habitat making room for reef, objectives scored against the status quo), so a non-modeller can run it from a browser. You pick an existing Ecospace model in this repository, set the constraints for an artificial-structure **installation**, **decommissioning**, or **mixed** strategy, and the solver runs Ecospace scenario after scenario. Scores, the cost frontier, the best layout and the best return-on-investment layout update after every run.
 
 ## Getting started (no R experience needed)
 
@@ -53,6 +53,7 @@ Structure layers hold the **proportion of each cell that is structure** (0-1), w
 * **Re-score** applies the current objective table to every run so far, also while the session is running: edited weights and directions, deleted objectives (no longer scored), and added ones, which are computed for each finished run from its saved Ecospace output. The evolutionary search and later runs then use the new objectives.
 * The score plots show the status quo level (0) as a gray dashed line.
 * The composite score is the weighted sum of each objective's relative change from the status quo (`weight × (value − status quo) / status quo`, with the sign flipped for `min` objectives). Each objective adds at most ±100% × its weight, so one whose status quo is near zero can't swamp the others. The `_vs_status_quo_pct` columns keep the full change. The status quo scores 0. A run is on the *cost frontier* when no other run scores at least as high for the same or lower cost.
+* **Best ROI** (return on investment) is the composite score gained per $1 million spent: `Score_per_Million_USD = Composite_Score / (total cost / 1e6)`. The best ROI run has the highest ratio among runs that cost something and beat the status quo. It has its own value box and map. On the cost-vs-score plot it is circled in green, and the gray dashed line from the origin (the status quo) through it is the steepest such line any run reaches. The ratio favours small projects: a cheap run with a small gain can top it. Read it together with `Marginal_Score_per_Million_USD`, the extra score per extra $1 million between each cost-frontier run and the next cheaper one. That column shows where spending more stops paying off. For a monetary return, use `USD_Gained_Per_USD` (revenue gain ÷ cost) and `Years_To_Benefit` (payback).
 
 ## Building the download
 
@@ -70,13 +71,21 @@ The *Live Solver package* GitHub Actions workflow builds the zip on every push t
 
 The **Results** tab shows, for the top scenarios, the percent change of every outcome compared with the no-change baseline. Blue bars are improvements in the direction you chose for that outcome; orange bars are worse. Click any scenario in the table to see its map and a table of its outcomes. The same percent changes are saved as `<objective>_vs_status_quo_pct` columns in `optimization_results.csv`.
 
+**Cells used by the best and worst runs** ranks the scored runs and takes the top and bottom 5, 10 (the default), 20 or 25%. A cell belongs to a group's *core* when at least the cut-off share of that group's runs (default 50%, adjustable from 10 to 100%) installed (or decommissioned) structure there. One map shows the top core in blue, the bottom core in orange, and cells in both cores in gray. Blue cells are the reliable choices; orange cells are best avoided. With random placement over many eligible cells, few cells reach 50% until the session has a few hundred runs or the evolutionary search has converged; lower the cut-off to see the emerging pattern. The table lists the cells most favoured by the top runs over the bottom ones (`top minus bottom`), with the share across all runs and the mean modules placed there by the top runs. A cell that appears in most top runs and few bottom runs is a more reliable choice than any one best layout. Caveats:
+
+* Evolutionary runs copy most of their parent's cells, so the top group can look more consistent than it is. Tick **Random runs only** to check a pattern on independent runs.
+* Bigger projects place structure in more cells, so cells are common in high-budget runs regardless of location. Compare the top share with the share across all runs.
+* With fewer than about 100 runs each group holds only a handful of runs. At least 10 scored runs are required.
+
 ## Outputs
 
 Each session writes to `Outputs/<region>/LiveSolver_<timestamp>/`:
 
-* `optimization_results.csv`: one row per run, with the drawn budget, modules and reef cells, average cost per module, modules per cell, contiguity, spatial footprint, removals, costs, every objective and its `_vs_status_quo_pct`, net pounds gained, pounds per module and per dollar, revenue gain and payback, composite score, Pareto and cost-frontier flags
+* `optimization_results.csv`: one row per run, with the drawn budget, modules and reef cells, average cost per module, modules per cell, contiguity, spatial footprint, removals, costs, every objective and its `_vs_status_quo_pct`, net pounds gained, pounds per module and per dollar, revenue gain and payback, composite score, Pareto and cost-frontier flags, score per $1 million (`Score_per_Million_USD`), the best ROI flag (`Best_ROI`) and the marginal score per $1 million along the cost frontier
 * `Run_XXXX/`: `Maps/` (every habitat layer used), `candidate.json` (cell indices), `cmd.txt`, console logs and the Ecospace CSVs
 * `Best_Maps/`: the best run's layers
+* `Best_ROI_Maps/`: the best ROI run's layers
+* `Cell_Frequency/`: `cell_frequency.csv` (every cell used by any run, with its share of the top 10%, bottom 10% and all runs, and its core group at the 50% cut-off, for installation and decommissioning), `.asc` maps of those shares (`install_top10_pct.asc`, `install_bottom10_pct.asc`, and `decom_...` for removals), and the core map `install_core_top_bottom10_cut50.asc` (1 = top, 2 = bottom, 3 = both). These are written when the session ends. Use the Results tab for other percentages and cut-offs.
 * `solver_config.json`: the exact configuration. Load it in the app or pass it to `run_headless.R` to reproduce the session.
 * `solver_log.txt`
 

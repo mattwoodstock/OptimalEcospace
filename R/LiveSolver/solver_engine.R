@@ -1271,7 +1271,8 @@ ls_synthetic_objectives <- function(P, layers, objectives) {
 # Derived columns that ls_score() recomputes from scratch
 ls_strip_scores <- function(df) {
   if (is.null(df)) return(NULL)
-  derived <- c("Composite_Score", "Pareto", "Cost_Frontier", "Gross_Revenue_Gain", "Years_To_Benefit",
+  derived <- c("Composite_Score", "Pareto", "Cost_Frontier", "Score_per_Million_USD", "Best_ROI",
+               "Marginal_Score_per_Million_USD", "Gross_Revenue_Gain", "Years_To_Benefit",
                "Lbs_Gained_Per_Module", "Lbs_Gained_Per_USD", "USD_Gained_Per_USD")
   drop <- names(df) %in% derived | grepl("_vs_status_quo_pct$|^Net_.*_Gain_(Lbs|USD)$", names(df))
   df[, !drop, drop = FALSE]
@@ -1347,6 +1348,24 @@ ls_score <- function(df, objectives, area_km2 = 1, econ = ls_default_econ(), roi
     o <- setdiff(cand, a)
     df$Cost_Frontier[a] <- !any(df$Composite_Score[o] >= df$Composite_Score[a] & df$total_cost[o] <= df$total_cost[a] &
                                 (df$Composite_Score[o] > df$Composite_Score[a] | df$total_cost[o] < df$total_cost[a]))
+  }
+
+  # Return on investment: composite score gained per $1 million spent. The best ROI run is the
+  # highest ratio among runs that cost something and beat the status quo.
+  df$Score_per_Million_USD <- ifelse(ok & is.finite(cost) & cost > 0, df$Composite_Score / (cost / 1e6), NA_real_)
+  df$Best_ROI <- FALSE
+  pos <- which(is.finite(df$Score_per_Million_USD) & df$Composite_Score > 0)
+  if (length(pos)) df$Best_ROI[pos[which.max(df$Score_per_Million_USD[pos])]] <- TRUE
+
+  # Marginal ROI along the cost frontier: extra score per extra $1 million over the next cheaper
+  # frontier run (the cheapest is compared with the status quo at $0, score 0)
+  df$Marginal_Score_per_Million_USD <- NA_real_
+  fr <- which(df$Cost_Frontier & is.finite(cost) & cost > 0)
+  fr <- fr[order(cost[fr])]
+  prev_c <- 0; prev_s <- 0
+  for (a in fr) {
+    if (cost[a] > prev_c) df$Marginal_Score_per_Million_USD[a] <- (df$Composite_Score[a] - prev_s) / ((cost[a] - prev_c) / 1e6)
+    prev_c <- cost[a]; prev_s <- df$Composite_Score[a]
   }
   df
 }
@@ -1793,6 +1812,17 @@ ls_close_session <- function(S, job = NULL) {
     dir.create(best_dir, showWarnings = FALSE)
     file.copy(list.files(best$map_dir, full.names = TRUE), best_dir, overwrite = TRUE)
     ls_log(S, sprintf("Best run: %s | score %.3f | cost %s", best$run, best$Composite_Score, ls_usd(best$total_cost)))
+    fq <- tryCatch(ls_write_cell_frequency(S, 10), error = function(e) NULL)
+    if (!is.null(fq)) ls_log(S, sprintf("Cell frequency (top and bottom 10%%: %d of %d runs each) saved to Cell_Frequency.", fq$n_group, fq$n_runs))
+
+    roi <- S$results[S$results$Best_ROI %in% TRUE, ]
+    if (nrow(roi)) {
+      roi_dir <- file.path(S$session_dir, "Best_ROI_Maps")
+      dir.create(roi_dir, showWarnings = FALSE)
+      file.copy(list.files(roi$map_dir[1], full.names = TRUE), roi_dir, overwrite = TRUE)
+      ls_log(S, sprintf("Best ROI run: %s | score %.3f per $1M | score %.3f | cost %s", roi$run[1],
+                        roi$Score_per_Million_USD[1], roi$Composite_Score[1], ls_usd(roi$total_cost[1])))
+    }
   }
   S$closed <- TRUE
   invisible(NULL)
@@ -1881,4 +1911,112 @@ ls_plot_layout <- function(P, cand = NULL, main = "", show_eligible = TRUE) {
   if (length(cand$install)) { lab <- c(lab, "New structure"); fill <- c(fill, NA); border <- c(border, ls_new_col) }
   if (length(cand$decom))   { lab <- c(lab, "Decommissioned"); fill <- c(fill, NA); border <- c(border, ls_removed_col) }
   legend("bottomright", legend = lab, fill = fill, border = border, cex = 0.72, bg = "white", box.col = "grey70")
+}
+
+# Cell Frequency ----
+# Which cells keep turning up in the best and worst runs. A single best run can be luck; a cell that
+# is built in most of the top runs (and few of the bottom ones) is a more reliable choice.
+
+# pct: share of runs in each group; cutoff: a cell belongs to a group's core when at least this
+# percent of the group's runs used it; random_only: leave out evolutionary runs, which inherit most
+# of their parent's cells and so make the top group look more consistent than it is
+ls_cell_frequency <- function(S, pct = 10, random_only = FALSE, cutoff = 50) {
+  df <- S$results
+  if (is.null(df)) return(NULL)
+  kinds <- if (random_only) "random" else c("random", "evolutionary")
+  df <- df[df$kind %in% kinds & df$finished %in% TRUE & is.finite(df$Composite_Score), , drop = FALSE]
+  n <- nrow(df)
+  if (!n) return(NULL)
+  df <- df[order(-df$Composite_Score), , drop = FALSE]
+  k <- max(1, ceiling(n * pct / 100))
+  groups <- list(all = df$run, top = head(df$run, k), bottom = tail(df$run, k))
+  ncell <- S$P$nr * S$P$nc
+
+  share <- function(runs, field) {
+    v <- tabulate(unlist(lapply(S$cands[runs], function(cn) unique(cn[[field]]))), nbins = ncell)
+    100 * v / length(runs)
+  }
+  mods <- function(runs) {
+    tot <- numeric(ncell)
+    for (cn in S$cands[runs]) if (length(cn$install)) tot[cn$install] <- tot[cn$install] + cn$modules
+    tot / length(runs)
+  }
+  f <- list()
+  for (g in names(groups)) {
+    f[[paste0("install_", g)]] <- share(groups[[g]], "install")
+    f[[paste0("decom_", g)]]   <- share(groups[[g]], "decom")
+  }
+  used <- which(f$install_all > 0 | f$decom_all > 0)
+  xy <- terra::xyFromCell(S$P$template, used)
+  tab <- data.frame(
+    cell = used, row = as.integer((used - 1) %/% S$P$nc + 1), col = as.integer((used - 1) %% S$P$nc + 1),
+    lon = round(xy[, 1], 5), lat = round(xy[, 2], 5),
+    install_top_pct = round(f$install_top[used], 1), install_bottom_pct = round(f$install_bottom[used], 1),
+    install_all_pct = round(f$install_all[used], 1),
+    install_top_minus_bottom = round(f$install_top[used] - f$install_bottom[used], 1),
+    mean_modules_top = round(mods(groups$top)[used], 1),
+    decom_top_pct = round(f$decom_top[used], 1), decom_bottom_pct = round(f$decom_bottom[used], 1),
+    decom_all_pct = round(f$decom_all[used], 1),
+    decom_top_minus_bottom = round(f$decom_top[used] - f$decom_bottom[used], 1)
+  )
+  core <- function(a) {
+    top <- f[[paste0(a, "_top")]][used] >= cutoff; bot <- f[[paste0(a, "_bottom")]][used] >= cutoff
+    ifelse(top & bot, "both", ifelse(top, "top", ifelse(bot, "bottom", "")))
+  }
+  tab$install_core <- core("install")
+  tab$decom_core   <- core("decom")
+  tab <- tab[order(-tab$install_top_minus_bottom, -tab$decom_top_minus_bottom), , drop = FALSE]
+  list(pct = pct, cutoff = cutoff, random_only = random_only, n_runs = n, n_group = k, maps = f, table = tab,
+       score_top = range(df$Composite_Score[seq_len(k)]), score_bottom = range(df$Composite_Score[n - k + seq_len(k)]))
+}
+
+# Writes cell_frequency.csv, one .asc map per group and action (percent of runs, -9999 = never) and
+# one core map per action (1 = top core, 2 = bottom core, 3 = both)
+ls_write_cell_frequency <- function(S, pct = 10, random_only = FALSE, cutoff = 50) {
+  fq <- ls_cell_frequency(S, pct, random_only, cutoff)
+  if (is.null(fq)) return(invisible(NULL))
+  out <- file.path(S$session_dir, "Cell_Frequency")
+  dir.create(out, showWarnings = FALSE)
+  write.csv(fq$table, file.path(out, "cell_frequency.csv"), row.names = FALSE)
+  for (m in c("install_top", "install_bottom", "decom_top", "decom_bottom")) {
+    v <- fq$maps[[m]]
+    if (!any(v > 0)) next
+    v[v <= 0] <- NA
+    ls_write_asc(S$P, v, file.path(out, sprintf("%s_%s%d_pct.asc", sub("_.*", "", m), sub(".*_", "", m), round(pct))))
+  }
+  for (a in c("install", "decom")) {
+    cls <- (fq$maps[[paste0(a, "_top")]] >= cutoff) + 2 * (fq$maps[[paste0(a, "_bottom")]] >= cutoff)
+    if (!any(cls > 0)) next
+    cls[cls == 0] <- NA
+    ls_write_asc(S$P, cls, file.path(out, sprintf("%s_core_top_bottom%d_cut%d.asc", a, round(pct), round(cutoff))))
+  }
+  invisible(fq)
+}
+
+ls_core_colors <- c(top = "#2a78d6", bottom = "#eb6834", both = "#5c5c5c")
+
+# One map of the cells used by at least `cutoff` percent of the top runs (blue), of the bottom runs
+# (orange) or of both (gray)
+ls_plot_frequency <- function(P, top, bottom, cutoff = 50, pct = 10, main = "") {
+  e  <- as.vector(ext(P$template))
+  xs <- seq(e[1], e[2], length.out = P$nc + 1)
+  ys <- seq(e[3], e[4], length.out = P$nr + 1)
+  grid <- function(v) t(matrix(v, nrow = P$nr, ncol = P$nc, byrow = TRUE)[P$nr:1, , drop = FALSE])
+  cls <- (top >= cutoff) + 2 * (bottom >= cutoff)
+  cls[!is.finite(cls) | cls == 0] <- NA
+
+  op <- par(mar = c(3.4, 3, 2.4, 1), mgp = c(1.8, 0.5, 0))
+  on.exit(par(op))
+  ratio <- diff(e[3:4]) / (diff(e[1:2]) * cos(mean(e[3:4]) * pi / 180))
+  pin <- par("pin")
+  par(pin = if (pin[1] * ratio <= pin[2]) c(pin[1], pin[1] * ratio) else c(pin[2] / ratio, pin[2]))
+  image(xs, ys, grid(ifelse(P$water, 2, 1)), col = ls_bg_colors[1:2], breaks = c(0.5, 1.5, 2.5),
+        xlab = "Longitude", ylab = "Latitude", main = main, useRaster = TRUE, xaxs = "i", yaxs = "i")
+  if (any(!is.na(cls))) image(xs, ys, grid(cls), col = ls_core_colors, breaks = c(0.5, 1.5, 2.5, 3.5), add = TRUE, useRaster = TRUE)
+  n <- vapply(1:3, function(k) sum(cls == k, na.rm = TRUE), numeric(1))
+  lab <- c(sprintf("Top %g%% of runs (%d cells)", pct, n[1]), sprintf("Bottom %g%% of runs (%d cells)", pct, n[2]),
+           sprintf("Both (%d cells)", n[3]))
+  legend("bottomright", legend = lab,
+         fill = ls_core_colors, border = ls_core_colors, cex = 0.75, bg = "white", box.col = "grey70",
+         title = sprintf("Used in >= %g%% of the group's runs", cutoff), title.cex = 0.75)
 }

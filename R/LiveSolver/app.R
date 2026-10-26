@@ -368,11 +368,12 @@ ui <- page_navbar(
 
   # Live tab ----
   nav_panel("Live solver",
-    layout_columns(col_widths = c(3, 3, 3, 3),
+    layout_columns(col_widths = c(2, 2, 2, 3, 3),
       value_box("Status", textOutput("vb_status"), textOutput("vb_mode"), theme = "primary"),
       value_box("Progress", textOutput("vb_progress"), textOutput("vb_elapsed"), theme = "secondary"),
       value_box("Best composite score", textOutput("vb_best"), textOutput("vb_best_run"), theme = "success"),
-      value_box("Best run cost", textOutput("vb_cost"), textOutput("vb_best_n"), theme = "info")
+      value_box("Best run cost", textOutput("vb_cost"), textOutput("vb_best_n"), theme = "info"),
+      value_box("Best ROI (score per $1M)", textOutput("vb_roi"), textOutput("vb_roi_run"), theme = "success")
     ),
     div(class = "mb-2",
       actionButton("pause_btn", "Pause after this run", class = "btn-warning btn-sm"),
@@ -382,10 +383,11 @@ ui <- page_navbar(
       actionButton("extend_btn", "Add iterations", class = "btn-sm"),
       actionButton("rescore_btn", "Re-score with current objective weights", class = "btn-sm")
     ),
-    layout_columns(col_widths = c(6, 6),
+    layout_columns(col_widths = c(6, 6, 4, 4, 4),
       card(card_header("Composite score by run"), plotOutput("trace_plot", height = "300px")),
       card(card_header("Cost vs. score (frontier highlighted)"), plotOutput("frontier_plot", height = "300px")),
       card(card_header(textOutput("best_title")), plotOutput("best_map", height = "360px")),
+      card(card_header(textOutput("roi_title")), plotOutput("roi_map", height = "360px")),
       card(card_header(textOutput("current_title")), plotOutput("current_map", height = "360px"))
     ),
     card(card_header("Solver log"), verbatimTextOutput("log_text"), max_height = "260px")
@@ -411,6 +413,23 @@ ui <- page_navbar(
         plotOutput("detail_map", height = "320px"),
         tableOutput("detail_table")
       )
+    ),
+    card(
+      card_header(class = "d-flex flex-wrap gap-3 align-items-center",
+        "Cells used by the best and worst runs",
+        selectInput("freq_pct", NULL, c("Top/bottom 5%" = 5, "Top/bottom 10%" = 10, "Top/bottom 20%" = 20, "Top/bottom 25%" = 25),
+                    selected = 10, width = "170px"),
+        sliderInput("freq_cutoff", "Cut-off: share of the group's runs", 10, 100, 50, step = 10, post = "%", width = "230px"),
+        radioButtons("freq_action", NULL, c("Installed" = "install", "Decommissioned" = "decom"), inline = TRUE),
+        checkboxInput("freq_random", "Random runs only", FALSE),
+        downloadButton("freq_download", "Download cells (.csv)", class = "btn-sm")),
+      p(class = "small text-muted px-3 mb-0", textOutput("freq_summary", inline = TRUE)),
+      plotOutput("freq_map", height = "460px"),
+      p(class = "small text-muted px-3",
+        "Blue cells were used by at least the cut-off share of the top runs, orange cells by at least that share of the bottom",
+        "runs, and gray cells by both. Blue cells are the most reliable choices; orange cells are best avoided. Evolutionary",
+        "runs copy most of their parent's cells, so tick 'Random runs only' to check that a pattern does not come from a single lineage."),
+      tableOutput("freq_table")
     ),
     card(card_header("All scenarios (click a row to inspect it)"), DTOutput("results_table"))
   )
@@ -865,6 +884,11 @@ server <- function(input, output, session) {
     if (is.null(df) || !any(is.finite(df$Composite_Score))) return(NULL)
     df[which.max(df$Composite_Score), ]
   })
+  best_roi_row <- reactive({
+    df <- results()
+    if (is.null(df) || !any(df$Best_ROI %in% TRUE)) return(NULL)
+    df[which(df$Best_ROI %in% TRUE)[1], ]
+  })
 
   output$vb_status <- renderText({
     rv$tick
@@ -892,6 +916,8 @@ server <- function(input, output, session) {
   output$vb_best_run <- renderText({ b <- best_row(); req(b); paste(b$run, if (isTRUE(b$Cost_Frontier)) "(on cost frontier)" else "") })
   output$vb_cost <- renderText({ b <- best_row(); if (is.null(b)) "-" else ls_usd(b$total_cost) })
   output$vb_best_n <- renderText({ b <- best_row(); req(b); sprintf("%s modules in %d cells / -%d removed", format(b$n_modules, big.mark = ","), b$n_installed, b$n_decommissioned) })
+  output$vb_roi <- renderText({ b <- best_roi_row(); if (is.null(b)) "-" else sprintf("%.4f", b$Score_per_Million_USD) })
+  output$vb_roi_run <- renderText({ b <- best_roi_row(); req(b); sprintf("%s: score %.3f for %s", b$run, b$Composite_Score, ls_usd(b$total_cost)) })
 
   output$trace_plot <- renderPlot({
     df <- results_view()
@@ -916,10 +942,24 @@ server <- function(input, output, session) {
     f <- df[df$Cost_Frontier %in% TRUE, ]
     f <- f[order(f$total_cost), ]
     lines(f$total_cost / 1e6, f$Composite_Score, col = "#d62728", type = "s")
+    r <- df[df$Best_ROI %in% TRUE, ]
+    if (nrow(r)) {
+      # The steepest line from the origin (status quo: $0, score 0) touches the best-ROI run
+      abline(a = 0, b = r$Composite_Score[1] / (r$total_cost[1] / 1e6), col = "gray50", lty = 2)
+      points(r$total_cost / 1e6, r$Composite_Score, pch = 1, cex = 2.2, lwd = 2, col = "#2ca02c")
+    }
+    legend("bottomright", c("run", "cost frontier", "best ROI"), col = c("#9ecae1", "#d62728", "#2ca02c"),
+           pch = c(19, 19, 1), cex = 0.8, bg = "white")
   })
   output$best_title <- renderText({ b <- best_row(); if (is.null(b)) "Best layout" else paste("Best layout:", b$run) })
   output$best_map <- renderPlot({
     b <- best_row()
+    req(b)
+    ls_plot_layout(rv$S$P, rv$S$cands[[b$run]], show_eligible = FALSE)
+  })
+  output$roi_title <- renderText({ b <- best_roi_row(); if (is.null(b)) "Best ROI layout" else paste("Best ROI layout:", b$run) })
+  output$roi_map <- renderPlot({
+    b <- best_roi_row()
     req(b)
     ls_plot_layout(rv$S$P, rv$S$cands[[b$run]], show_eligible = FALSE)
   })
@@ -949,7 +989,7 @@ server <- function(input, output, session) {
     sel <- if (!is.null(rv$selected_run) && rv$selected_run %in% df$run) which(df$run == rv$selected_run) else NULL
     dt <- datatable(df, rownames = FALSE, filter = "top", selection = list(mode = "single", selected = sel),
                     options = list(pageLength = 25, scrollX = TRUE, order = list(list(which(names(df) == "Composite_Score") - 1, "desc"))))
-    round_cols <- intersect(num_cols, c("Composite_Score", objectives()$name,
+    round_cols <- intersect(num_cols, c("Composite_Score", "Score_per_Million_USD", "Marginal_Score_per_Million_USD", objectives()$name,
                                         grep("_vs_status_quo_pct$", names(df), value = TRUE)))
     if (length(round_cols)) dt <- formatRound(dt, round_cols, 4)
     dt
@@ -1021,6 +1061,50 @@ server <- function(input, output, session) {
       abline(v = 0, col = "#6b6b6b")
     }
   })
+
+  # Cell frequency in the top and bottom runs
+  freq <- reactive({
+    df <- results_view()
+    req(df, rv$S)
+    ls_cell_frequency(rv$S, as.numeric(input$freq_pct), isTRUE(input$freq_random), as.numeric(input$freq_cutoff %||% 50))
+  })
+  freq_ready <- reactive({
+    fq <- freq()
+    shiny::validate(shiny::need(!is.null(fq) && fq$n_runs >= 10, "Needs at least 10 scored runs."))
+    fq
+  })
+  output$freq_summary <- renderText({
+    fq <- freq_ready()
+    sprintf("%d scored runs; each group has the %d highest or lowest. Top scores %.3f to %.3f; bottom scores %.3f to %.3f.",
+            fq$n_runs, fq$n_group, fq$score_top[1], fq$score_top[2], fq$score_bottom[1], fq$score_bottom[2])
+  })
+  freq_label <- reactive(if (input$freq_action == "install") "installed" else "decommissioned")
+  output$freq_map <- renderPlot({
+    fq <- freq_ready()
+    a <- input$freq_action
+    ls_plot_frequency(rv$S$P, fq$maps[[paste0(a, "_top")]], fq$maps[[paste0(a, "_bottom")]], fq$cutoff, fq$pct,
+                      sprintf("Cells %s by the top and bottom %s%% of runs", freq_label(), input$freq_pct))
+  })
+  output$freq_table <- renderTable({
+    fq <- freq_ready()
+    a <- input$freq_action
+    t <- fq$table
+    t <- t[order(-t[[paste0(a, "_top_minus_bottom")]]), , drop = FALSE]
+    t <- t[t[[paste0(a, "_all_pct")]] > 0, , drop = FALSE]
+    out <- data.frame(Cell = as.integer(t$cell), Row = as.integer(t$row), Column = as.integer(t$col),
+                      Longitude = sprintf("%.3f", t$lon), Latitude = sprintf("%.3f", t$lat),
+                      `Top runs (%)` = t[[paste0(a, "_top_pct")]], `Bottom runs (%)` = t[[paste0(a, "_bottom_pct")]],
+                      `All runs (%)` = t[[paste0(a, "_all_pct")]], `Top minus bottom` = t[[paste0(a, "_top_minus_bottom")]],
+                      `Map colour` = unname(c(top = "blue (top)", bottom = "orange (bottom)", both = "gray (both)")[t[[paste0(a, "_core")]]]),
+                      check.names = FALSE)
+    if (a == "install") out$`Mean modules (top runs)` <- t$mean_modules_top
+    head(out, 15)
+  }, digits = 1, na = "", striped = TRUE, spacing = "xs", caption = "Cells most favoured by the top runs over the bottom runs (first 15)",
+     caption.placement = "top")
+  output$freq_download <- downloadHandler(
+    filename = function() sprintf("cell_frequency_top_bottom_%spct.csv", input$freq_pct),
+    content = function(file) write.csv(freq_ready()$table, file, row.names = FALSE)
+  )
 
   output$res_download <- downloadHandler(
     filename = function() "optimization_results.csv",
