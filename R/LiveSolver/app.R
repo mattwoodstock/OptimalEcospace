@@ -130,6 +130,13 @@ ui <- page_navbar(
                    "footprint plus a halo that grows with neighbouring reef; cover in a cell saturates as modules stack."),
           h6("Budget"),
           num("inst_budget", "Maximum budget per scenario (USD)", defaults$install$budget, min = 0, step = 100000),
+          num("inst_budget_min", "Minimum budget per scenario (USD, blank = one module)", defaults$install$budget_min, min = 0, step = 10000),
+          radioButtons("inst_budget_sampling", "How budgets are drawn", c(
+            "Uniform: every amount equally likely" = "uniform",
+            "Favour smaller budgets" = "low",
+            "Log-uniform: each tenfold range equally likely" = "log"), selected = defaults$install$budget_sampling),
+          conditionalPanel("input.inst_budget_sampling == 'low'",
+            sliderInput("inst_budget_skew", "Strength (1 = uniform)", 1, 5, defaults$install$budget_skew, 0.5)),
           layout_columns(
             num("inst_drop", "Max modules per drop", defaults$install$max_modules_per_drop, min = 1, step = 1),
             num("inst_discount", "Max batch discount (0-1)", defaults$install$max_batch_discount, min = 0, max = 0.99, step = 0.05)
@@ -529,7 +536,9 @@ server <- function(input, output, session) {
       ),
       strategy = list(type = input$strategy_type, shared_budget = input$shared_budget),
       install = list(
-        budget = nv("inst_budget", defaults$install$budget), unit_cost = nv("inst_unit_cost", defaults$install$unit_cost),
+        budget = nv("inst_budget", defaults$install$budget), budget_min = nv("inst_budget_min", NA),
+        budget_sampling = input$inst_budget_sampling %||% "uniform", budget_skew = nv("inst_budget_skew", defaults$install$budget_skew),
+        unit_cost = nv("inst_unit_cost", defaults$install$unit_cost),
         depth_cost_factor = nv("inst_depth_factor", defaults$install$depth_cost_factor), ref_depth_m = nv("inst_ref_depth", defaults$install$ref_depth_m),
         unit_footprint_m2 = nv("inst_footprint_m2", defaults$install$unit_footprint_m2), unit_height_m = nv("inst_height", defaults$install$unit_height_m),
         min_clearance_m = nv("inst_clearance", defaults$install$min_clearance_m), halo_base_m = nv("inst_halo", defaults$install$halo_base_m),
@@ -574,7 +583,7 @@ server <- function(input, output, session) {
     nums <- c(ecosim_scenario = M$ecosim_scenario, ecospace_scenario = M$ecospace_scenario, n_years = M$n_years,
               spinup_years = M$spinup_years, timesteps_year = M$timesteps_year, n_threads = M$n_threads,
               timeout_sec = M$timeout_sec,
-              inst_budget = I$budget, inst_unit_cost = I$unit_cost, inst_depth_factor = I$depth_cost_factor,
+              inst_budget = I$budget, inst_budget_min = I$budget_min, inst_unit_cost = I$unit_cost, inst_depth_factor = I$depth_cost_factor,
               inst_ref_depth = I$ref_depth_m, inst_footprint_m2 = I$unit_footprint_m2, inst_height = I$unit_height_m,
               inst_clearance = I$min_clearance_m, inst_halo = I$halo_base_m, inst_max_frac = I$max_reef_fraction,
               inst_drop = I$max_modules_per_drop, inst_discount = I$max_batch_discount, inst_connect_bonus = I$connectivity_bonus,
@@ -588,14 +597,14 @@ server <- function(input, output, session) {
               iterations = Se$iterations, seed = Se$seed, warmup = Se$warmup, eval_last_n = Se$eval_last_n,
               econ_lbs = cfg$econ$lbs_per_mt, econ_default_price = cfg$econ$default_price)
     for (id in names(nums)) updateNumericInput(session, id, value = ls_num(nums[[id]]))
-    sliders <- c(inst_avoid_thr = I$avoid_threshold, dec_removal_fraction = D$removal_fraction)
+    sliders <- c(inst_avoid_thr = I$avoid_threshold, dec_removal_fraction = D$removal_fraction, inst_budget_skew = I$budget_skew)
     for (id in names(sliders)) updateSliderInput(session, id, value = ls_num(sliders[[id]]))
     updateSliderInput(session, "mutation", value = c(ls_num(Se$mutation_min, 0.1), ls_num(Se$mutation_max, 0.4)))
     checks <- c(use_spinup = M$use_spinup, shared_budget = cfg$strategy$shared_budget,
                 inst_connect = I$enforce_connectivity, inst_use_excl = I$use_exclusions,
                 dry_run = Se$dry_run)
     for (id in names(checks)) updateCheckboxInput(session, id, value = isTRUE(checks[[id]]))
-    radios <- c(pristine_source = cfg$layers$pristine_source %||% "auto", existing_cover = cfg$layers$existing_cover %||% "auto",
+    radios <- c(inst_budget_sampling = I$budget_sampling %||% "uniform", pristine_source = cfg$layers$pristine_source %||% "auto", existing_cover = cfg$layers$existing_cover %||% "auto",
                 reef_baseline = cfg$layers$reef_baseline %||% "auto",
                 strategy_type = cfg$strategy$type, dec_cost_source = D$cost_source,
                 algorithm = Se$algorithm)
@@ -786,16 +795,10 @@ server <- function(input, output, session) {
   observeEvent(input$rescore_btn, {
     S <- rv$S
     req(S, !is.null(S$results))
-    new <- objectives()
-    cur <- S$cfg$objectives
-    hit <- match(cur$name, new$name)
-    cur$weight[!is.na(hit)]    <- new$weight[hit[!is.na(hit)]]
-    cur$direction[!is.na(hit)] <- new$direction[hit[!is.na(hit)]]
-    S$cfg$objectives <- cur
-    S$P$cfg$objectives <- cur
-    S$results <- ls_rescore(S, S$results)
-    write.csv(S$results, S$results_file, row.names = FALSE)
-    ls_log(S, "Re-scored with updated objective weights/directions.")
+    ok <- tryCatch({
+      ls_update_objectives(S, objectives(), input$roi_objective, input$revenue_objective); TRUE
+    }, error = function(e) { showNotification(paste("Re-score failed:", conditionMessage(e)), type = "error"); FALSE })
+    if (ok) showNotification(sprintf("Re-scored %d runs with the current objectives.", nrow(S$results)), type = "message")
     rv$tick <- rv$tick + 1
   })
 
@@ -859,6 +862,7 @@ server <- function(input, output, session) {
     par(mar = c(4, 4, 1, 1))
     cols <- c(probe = "#b5b5b5", baseline_none = "#6b6b6b", random = "#2a78d6", evolutionary = "#eb6834")
     plot(df$iteration, df$Composite_Score, pch = 19, col = cols[df$kind], xlab = "Run", ylab = "Composite score")
+    abline(h = 0, col = "gray50", lty = 2)   # status quo level
     sc <- df$Composite_Score; sc[is.na(sc)] <- -Inf
     lines(df$iteration, cummax(sc), type = "s", col = "#d62728", lwd = 2)
     legend("bottomright", c(names(cols)[names(cols) %in% df$kind], "best so far"),
@@ -871,6 +875,7 @@ server <- function(input, output, session) {
     par(mar = c(4, 4, 1, 1))
     plot(df$total_cost / 1e6, df$Composite_Score, pch = 19, col = ifelse(df$Cost_Frontier %in% TRUE, "#d62728", "#9ecae1"),
          xlab = "Total cost (million USD)", ylab = "Composite score")
+    abline(h = 0, col = "gray50", lty = 2)   # status quo level
     f <- df[df$Cost_Frontier %in% TRUE, ]
     f <- f[order(f$total_cost), ]
     lines(f$total_cost / 1e6, f$Composite_Score, col = "#d62728", type = "s")

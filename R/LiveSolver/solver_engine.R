@@ -315,6 +315,9 @@ ls_default_config <- function(repo_root) {
     # Reef modules (structure_optimization.R reef_params): standard prefab concrete modules
     install = list(
       budget                = 6000000, # each scenario draws a random budget up to this (USD)
+      budget_min            = NA,      # smallest budget drawn (blank = the cost of one module)
+      budget_sampling       = "uniform", # uniform | low (favour smaller budgets) | log (log-uniform)
+      budget_skew           = 2,       # "low" only: 1 = uniform; higher = smaller budgets more often
       unit_cost             = 2500,    # deployed cost per module (USD)
       depth_cost_factor     = 0,       # > 0 makes deeper deployment cost more per module
       ref_depth_m           = 30,      # reference depth for the depth cost factor
@@ -789,7 +792,10 @@ ls_problem_summary <- function(P) {
       if (any(P$struct0 > 0)) paste(ls_pct(min(P$struct0[P$struct0 > 0])), "-", ls_pct(max(P$struct0))) else "-",
       length(P$install_valid),
       rng(uc, ls_usd), rng(pmin(1, uf), ls_pct),
-      paste("random, up to", ls_usd(ls_num(I$budget, 0))),
+      sprintf("random, %s to %s%s", ls_usd(max(ls_num(I$budget_min, 0), if (length(uc)) min(uc) else 0)),
+              ls_usd(ls_num(I$budget, 0)),
+              switch(I$budget_sampling %||% "uniform", low = sprintf(" (favouring smaller budgets, strength %g)", ls_num(I$budget_skew, 2)),
+                     log = " (log-uniform: each tenfold range equally likely)", "")),
       length(P$decom_eligible), rng(dc, ls_usd)
     ),
     stringsAsFactors = FALSE
@@ -802,6 +808,18 @@ ls_affordable <- function(cost, budget) sum(cumsum(sort(cost)) <= budget)
 
 # Modules allocated as random batch drops until a randomly drawn budget is spent
 # (structure_optimization.R batch-stacking loop). `initial` = modules kept from a parent run.
+# A scenario's budget between lo and hi: uniform; "low" = lo + (hi - lo) * U^skew (skew > 1 draws small
+# budgets more often; 2 puts a quarter of scenarios in the bottom 6% of the range); "log" = log-uniform
+# (each tenfold range of budgets equally likely)
+ls_draw_budget <- function(lo, hi, sampling = "uniform", skew = 2) {
+  if (!is.finite(hi) || hi <= lo) return(lo)
+  u <- stats::runif(1)
+  switch(sampling,
+    low = lo + (hi - lo) * u^max(1, skew),
+    log = if (lo > 0) exp(log(lo) + u * (log(hi) - log(lo))) else lo + (hi - lo) * u,
+    lo + (hi - lo) * u)
+}
+
 ls_gen_modules <- function(P, budget_limit, initial = NULL) {
   I <- P$cfg$install
   n <- length(P$depth)
@@ -827,7 +845,9 @@ ls_gen_modules <- function(P, budget_limit, initial = NULL) {
   min_site <- min(uc[valid])
   lo <- max(spent, min_site)
   hi <- max(max(budget_limit, min_site), lo)
-  run_budget <- stats::runif(1, lo, hi)
+  bmin <- ls_num(I$budget_min, NA)
+  if (is.finite(bmin)) lo <- min(hi, max(lo, bmin))
+  run_budget <- ls_draw_budget(lo, hi, I$budget_sampling %||% "uniform", ls_num(I$budget_skew, 2))
 
   weights <- rep(1, n)
   if (connect && !is.null(initial)) {
@@ -1406,6 +1426,53 @@ ls_rescore <- function(S, df) {
            cfg$search$roi_objective %||% "RS_Catch", cfg$search$revenue_objective %||% "Total_Revenue")
 }
 
+# Row-bind results whose objective columns differ (objectives added or removed mid-session)
+ls_bind_rows <- function(a, b) {
+  if (is.null(a)) return(b)
+  for (n in setdiff(names(b), names(a))) a[[n]] <- rep(NA, nrow(a))
+  for (n in setdiff(names(a), names(b))) b[[n]] <- rep(NA, nrow(b))
+  rbind(a, b[, names(a), drop = FALSE])
+}
+
+# Re-score a session (also while it runs) with a new objective table: the session then uses exactly
+# these objectives. Objectives it has not computed yet are evaluated for every finished run from the
+# run's saved Ecospace output (or, in test mode, from its layout); removed ones stay in the results
+# file as reported values but no longer count.
+ls_update_objectives <- function(S, objectives, roi_objective = NULL, revenue_objective = NULL) {
+  cfg <- S$cfg
+  objectives <- as.data.frame(objectives, stringsAsFactors = FALSE)
+  df <- S$results
+  new <- objectives[!objectives$name %in% names(df), , drop = FALSE]
+  if (nrow(new) && !is.null(df) && nrow(df)) {
+    vals <- matrix(NA_real_, nrow(df), nrow(new), dimnames = list(NULL, new$name))
+    for (i in seq_len(nrow(df))) {
+      if (!isTRUE(df$finished[i])) next
+      run_dir <- dirname(df$map_dir[i])
+      v <- if (isTRUE(cfg$search$dry_run)) {
+        cand <- S$cands[[df$run[i]]]
+        if (is.null(cand)) NULL else ls_synthetic_objectives(S$P, ls_apply_candidate(S$P, cand), new)
+      } else if (dir.exists(run_dir)) {
+        ls_evaluate_objectives(run_dir, new, cfg$search$eval_last_n, cfg$econ, S$P$total_area_km2)
+      }
+      if (!is.null(v)) vals[i, ] <- vapply(new$name, function(n) ls_num(v[[n]], NA_real_), numeric(1))
+    }
+    for (n in new$name) df[[n]] <- vals[, n]
+  }
+  cfg$objectives <- objectives
+  if (!is.null(roi_objective)) cfg$search$roi_objective <- roi_objective
+  if (!is.null(revenue_objective)) cfg$search$revenue_objective <- revenue_objective
+  S$cfg <- cfg
+  S$P$cfg <- cfg
+  if (!is.null(df)) {
+    S$results <- ls_rescore(S, df)
+    write.csv(S$results, S$results_file, row.names = FALSE)
+    ls_save_config(cfg, file.path(S$session_dir, "solver_config.json"))
+  }
+  ls_log(S, sprintf("Re-scored %d run(s) with: %s", if (is.null(df)) 0L else nrow(df),
+                    paste(sprintf("%s (%s, w=%g)", objectives$name, objectives$direction, objectives$weight), collapse = "; ")))
+  invisible(S)
+}
+
 ls_next_job <- function(S) {
   if (S$i >= S$total_runs) return(NULL)
   S$i <- S$i + 1
@@ -1536,7 +1603,7 @@ ls_finish_job <- function(S, job) {
   row <- cbind(row, as.data.frame(obj, check.names = FALSE))
   write.csv(row, file.path(job$run_dir, "run_summary.csv"), row.names = FALSE)
 
-  S$results <- ls_rescore(S, rbind(ls_strip_scores(S$results), row))
+  S$results <- ls_rescore(S, ls_bind_rows(ls_strip_scores(S$results), row))
   write.csv(S$results, S$results_file, row.names = FALSE)
 
   sc <- S$results$Composite_Score[nrow(S$results)]
