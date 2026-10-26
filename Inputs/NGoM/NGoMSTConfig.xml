@@ -1,48 +1,63 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Datasets Name="NGoMSTConfig" Author="msw200" Contact="" Station="UM-3CHKF64" Description="">
-  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cSingleFileDataSetPlugin" GUID="08e81913-15bb-41bd-855e-b0e6167305fe">
+  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cASCIIFilesDataSetPlugin" GUID="4423437c-80ee-4b14-ae43-80ca0f9302c8">
     <Configuration>
       <Name>structures_all</Name>
-      <Description>
-      </Description>
+      <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerHabitat</Variable>
-      <File IsRelative="False" Date="1/1/2019">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\structures_all.asc</File>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM</Source>
+      <Seasonal EndDate="2100-01-01">False</Seasonal>
+      <Files>
+        <File Date="2019-01-01">structures_all.asc</File>
+      </Files>
     </Configuration>
   </Dataset>
-  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cSingleFileDataSetPlugin" GUID="cfd61b7a-ba8f-49d6-979f-fbca5e49cc55">
+  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cASCIIFilesDataSetPlugin" GUID="407072dc-cdfe-4b91-b087-8d4af3ea7213">
     <Configuration>
       <Name>gravel</Name>
-      <Description>
-      </Description>
+      <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerHabitat</Variable>
-      <File IsRelative="False" Date="1/1/2019">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\gravel.asc</File>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM</Source>
+      <Seasonal EndDate="2100-01-01">False</Seasonal>
+      <Files>
+        <File Date="2019-01-01">gravel.asc</File>
+      </Files>
     </Configuration>
   </Dataset>
-  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cSingleFileDataSetPlugin" GUID="22707613-fb61-497c-86f0-001897d15f4c">
+  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cASCIIFilesDataSetPlugin" GUID="6bea2f4b-b388-4041-bcba-abf59277d297">
     <Configuration>
       <Name>mud</Name>
-      <Description>
-      </Description>
+      <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerHabitat</Variable>
-      <File IsRelative="False" Date="1/1/2019">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\mud.asc</File>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM</Source>
+      <Seasonal EndDate="2100-01-01">False</Seasonal>
+      <Files>
+        <File Date="2019-01-01">mud.asc</File>
+      </Files>
     </Configuration>
   </Dataset>
-  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cSingleFileDataSetPlugin" GUID="ee334fba-056f-465a-994c-2cff4774c309">
-    <Configuration>
-      <Name>rock</Name>
-      <Description>
-      </Description>
-      <Variable>LayerHabitat</Variable>
-      <File IsRelative="False" Date="1/1/2019">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\rock.asc</File>
-    </Configuration>
-  </Dataset>
-  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cSingleFileDataSetPlugin" GUID="c0a4a29a-7543-405f-9116-62413f34a795">
+  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cASCIIFilesDataSetPlugin" GUID="f2ee6a4f-6195-4021-a453-a1e8580f3420">
     <Configuration>
       <Name>sand</Name>
-      <Description>
-      </Description>
+      <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
       <Variable>LayerHabitat</Variable>
-      <File IsRelative="False" Date="1/1/2019">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM\sand.asc</File>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM</Source>
+      <Seasonal EndDate="2100-01-01">False</Seasonal>
+      <Files>
+        <File Date="2019-01-01">sand.asc</File>
+      </Files>
+    </Configuration>
+  </Dataset>
+  <Dataset Type="EwESpatialAssetsPlugin!EwESpatialAssetsPlugin.SpatialData.cASCIIFilesDataSetPlugin" GUID="92cdf572-5d82-4ce9-9508-50923a78aee2">
+    <Configuration>
+      <Name>rock</Name>
+      <Description>A series of ASCII map files, prepared to match a specific Ecospace map size and extent</Description>
+      <Variable>LayerHabitat</Variable>
+      <Source IsRelative="False">C:\Users\msw200\Documents\GitHub\OptimalEcospace\Inputs\NGoM</Source>
+      <Seasonal EndDate="2100-01-01">False</Seasonal>
+      <Files>
+        <File Date="2019-01-01">rock.asc</File>
+      </Files>
     </Configuration>
   </Dataset>
 </Datasets>
