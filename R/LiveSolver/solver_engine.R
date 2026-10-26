@@ -113,20 +113,37 @@ ls_discover_models <- function(repo_root) {
 }
 
 # Read the spatial-temporal config and locate every habitat layer locally
+# Two dataset formats: a single file (<File>), or a series of dated ASCII grids
+# (<Source> folder + <Files><File Date=...>), whose latest grid is the one a scenario changes
 ls_read_stconfig <- function(stconfig, inputs_dir) {
   doc <- read_xml(stconfig)
   xml_ns_strip(doc)
   confs <- xml_find_all(doc, "//Dataset/Configuration")
+  last_file <- lapply(confs, function(cf) {
+    f <- xml_find_all(cf, "Files/File")
+    if (!length(f)) return(c(NA, NA))
+    d <- xml_attr(f, "Date")
+    k <- if (all(is.na(d))) length(f) else which.max(as.Date(d))
+    c(xml_text(f[k]), d[k])
+  })
+  single <- xml_text(xml_find_first(confs, "File"))
+  multi  <- vapply(last_file, `[`, "", 1)
   layers <- data.frame(
     name     = xml_text(xml_find_first(confs, "Name")),
     variable = xml_text(xml_find_first(confs, "Variable")),
-    file_xml = xml_text(xml_find_first(confs, "File")),
+    file_xml = ifelse(is.na(single), multi, single),
+    date     = vapply(last_file, `[`, "", 2),
+    series   = is.na(single) & !is.na(multi),
     guid     = xml_attr(xml_parent(confs), "GUID"),
     stringsAsFactors = FALSE
   )
-  # STConfig stores absolute Windows paths; resolve by file name inside Inputs/<region>
+  # STConfig stores absolute Windows paths; resolve by file name inside Inputs/<region>. A layer
+  # linked to a file that is not in Inputs (e.g. a test grid in the pristine folder) uses <name>.asc
   local_name <- basename(gsub("\\\\", "/", layers$file_xml))
-  local_name[is.na(local_name) | local_name == ""] <- paste0(layers$name, ".asc")
+  by_name <- paste0(layers$name, ".asc")
+  use_name <- is.na(local_name) | local_name == "" |
+    (!file.exists(file.path(inputs_dir, local_name)) & file.exists(file.path(inputs_dir, by_name)))
+  local_name[use_name] <- by_name[use_name]
   layers$file <- normalizePath(file.path(inputs_dir, local_name), winslash = "/", mustWork = FALSE)
   layers$exists <- file.exists(layers$file)
   layers
@@ -1080,6 +1097,16 @@ ls_write_stconfig <- function(stconfig, layer_files, path) {
     if (!is.na(node)) {
       fn <- xml_find_first(node, "File")
       if (!is.na(fn)) xml_text(fn) <- ls_winpath(layer_files[[nm]])
+      # Dated ASCII series: point the folder at Inputs and the latest grid at the layer's file;
+      # its date (when the external map takes effect) is left as set in the model
+      files <- xml_find_all(node, "Files/File")
+      if (length(files)) {
+        src <- xml_find_first(node, "Source")
+        if (!is.na(src)) { xml_text(src) <- ls_winpath(dirname(layer_files[[nm]])); xml_attr(src, "IsRelative") <- "False" }
+        d <- xml_attr(files, "Date")
+        k <- if (all(is.na(d))) length(files) else which.max(as.Date(d))
+        xml_text(files[k]) <- basename(layer_files[[nm]])
+      }
     }
   }
   write_xml(doc, path)
