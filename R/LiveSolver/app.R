@@ -24,6 +24,72 @@ models    <- ls_discover_models(repo_root)
 models$key <- paste(models$region, models$model_name, sep = " / ")
 defaults  <- ls_default_config(repo_root)
 
+# Session runner ----
+# The solver session lives in the R process, not in a browser tab: it keeps running if the tab is
+# closed, put to sleep by the browser, or reloaded, and any page opened later shows it. Maps are
+# restored when the session finishes, is stopped, or when the app (R / RStudio) is closed.
+RUN <- new.env()
+RUN$S <- NULL; RUN$job <- NULL; RUN$state <- "idle"; RUN$tick <- 0; RUN$loop <- FALSE; RUN$notices <- list()
+
+run_bump   <- function() RUN$tick <- RUN$tick + 1
+run_notice <- function(msg, type = "message") { RUN$notices[[length(RUN$notices) + 1]] <- list(msg = msg, type = type); run_bump() }
+
+# One step: start the next run, or poll / finish the current one (pausing = finish it, then hold)
+run_step <- function() {
+  S <- RUN$S
+  tryCatch({
+    job <- RUN$job
+    if (is.null(job)) {
+      if (RUN$state == "pausing") { RUN$state <- "paused"; return(run_bump()) }
+      job <- ls_next_job(S)
+      if (is.null(job)) {
+        ls_close_session(S)
+        RUN$state <- "finished"
+        run_notice("Solver finished.")
+      } else {
+        job <- ls_start_job(S, job)
+      }
+    } else {
+      job <- ls_poll_job(S, job)
+    }
+    if (!is.null(job) && job$state %in% c("done", "skipped")) {
+      ls_finish_job(S, job)
+      job <- NULL
+      if (RUN$state == "pausing") RUN$state <- "paused"
+    }
+    RUN$job <- job
+    run_bump()
+  }, error = function(e) {
+    ls_log(S, paste("ERROR:", conditionMessage(e)))
+    ls_close_session(S, RUN$job)
+    RUN$job <- NULL
+    RUN$state <- "error"
+    run_notice(paste("Solver stopped:", conditionMessage(e)), "error")
+  })
+}
+
+# Drive the session with `later` (part of Shiny), independent of any browser session
+run_schedule <- function() {
+  if (isTRUE(RUN$loop)) return(invisible())
+  RUN$loop <- TRUE
+  step <- function() {
+    if (!RUN$state %in% c("running", "pausing")) { RUN$loop <- FALSE; return(invisible()) }
+    run_step()
+    fast <- is.null(RUN$job) || isTRUE(RUN$S$cfg$search$dry_run)
+    later::later(step, if (fast) 0.03 else 1)
+  }
+  later::later(step, 0)
+}
+
+# Closing the app (R or RStudio) ends the session and restores the maps
+onStop(function() {
+  S <- RUN$S
+  if (!is.null(S) && !isTRUE(S$closed)) {
+    ls_log(S, "App closed: stopping the session.")
+    ls_close_session(S, RUN$job)
+  }
+})
+
 # UI helpers ----
 
 num <- function(id, label, value, ...) numericInput(id, label, if (is.null(value) || is.na(value)) NA else value, ...)
@@ -353,7 +419,7 @@ ui <- page_navbar(
 server <- function(input, output, session) {
 
   rv <- reactiveValues(S = NULL, job = NULL, state = "idle", tick = 0, sample = NULL, pending = NULL,
-                       selected_run = NULL, autostart = FALSE, alerts_shown = 0)
+                       selected_run = NULL, autostart = FALSE, alerts_shown = 0, notices_seen = 0)
   objectives <- reactiveVal(defaults$objectives)
   prices     <- reactiveVal(defaults$econ$prices)
   fleets     <- reactiveVal(defaults$econ$fleets)
@@ -694,7 +760,7 @@ server <- function(input, output, session) {
 
   # Live loop: one step per tick so the UI stays responsive ----
   start_session <- function() {
-    if (rv$state %in% c("running", "paused", "pausing")) {
+    if (RUN$state %in% c("running", "paused", "pausing")) {
       showNotification("A session is already active. Stop it first.", type = "warning"); return()
     }
     cfg <- config()
@@ -709,7 +775,9 @@ server <- function(input, output, session) {
     })
     removeNotification("starting")
     req(S)
-    rv$S <- S; rv$job <- NULL; rv$state <- "running"; rv$tick <- rv$tick + 1
+    RUN$S <- S; RUN$job <- NULL; RUN$state <- "running"; RUN$notices <- list(); run_bump()
+    run_schedule()
+    sync_run()
     rv$selected_run <- NULL
     rv$alerts_shown <- 0
     nav_select("nav", "Live solver")
@@ -729,68 +797,19 @@ server <- function(input, output, session) {
     isolate(start_session())
   })
 
-  observe({
-    req(rv$state == "running")
-    invalidateLater(if (is.null(isolate(rv$job)) || isTRUE(isolate(rv$S$cfg$search$dry_run))) 30 else 1000)
-    isolate({
-      S <- rv$S
-      tryCatch({
-        job <- rv$job
-        if (is.null(job)) {
-          job <- ls_next_job(S)
-          if (is.null(job)) {
-            ls_close_session(S)
-            rv$state <- "finished"
-            showNotification("Solver finished.", type = "message")
-          } else {
-            job <- ls_start_job(S, job)
-          }
-        } else {
-          job <- ls_poll_job(S, job)
-        }
-        if (!is.null(job) && job$state %in% c("done", "skipped")) {
-          ls_finish_job(S, job)
-          job <- NULL
-        }
-        rv$job <- job
-        rv$tick <- rv$tick + 1
-      }, error = function(e) {
-        ls_log(S, paste("ERROR:", conditionMessage(e)))
-        ls_close_session(S, rv$job)
-        rv$job <- NULL
-        rv$state <- "error"
-        rv$tick <- rv$tick + 1
-        showNotification(paste("Solver stopped:", conditionMessage(e)), type = "error", duration = NULL)
-      })
-    })
-  })
-
-  # Pause: let the current run finish, then hold
-  observe({
-    req(rv$state == "pausing")
-    invalidateLater(1000)
-    isolate({
-      if (!is.null(rv$job)) {
-        rv$job <- ls_poll_job(rv$S, rv$job)
-        if (rv$job$state %in% c("done", "skipped")) { ls_finish_job(rv$S, rv$job); rv$job <- NULL }
-      }
-      if (is.null(rv$job)) rv$state <- "paused"
-      rv$tick <- rv$tick + 1
-    })
-  })
-  observeEvent(input$pause_btn, if (rv$state == "running") rv$state <- "pausing")
-  observeEvent(input$resume_btn, if (rv$state %in% c("paused", "pausing")) rv$state <- "running")
+  observeEvent(input$pause_btn, if (RUN$state == "running") { RUN$state <- "pausing"; run_bump(); sync_run() })
+  observeEvent(input$resume_btn, if (RUN$state %in% c("paused", "pausing")) { RUN$state <- "running"; run_bump(); run_schedule(); sync_run() })
   observeEvent(input$stop_btn, {
-    req(rv$S, rv$state %in% c("running", "paused", "pausing"))
-    ls_log(rv$S, "Stopped by user.")
-    ls_close_session(rv$S, rv$job)
-    rv$job <- NULL; rv$state <- "stopped"; rv$tick <- rv$tick + 1
+    req(RUN$S, RUN$state %in% c("running", "paused", "pausing"))
+    ls_log(RUN$S, "Stopped by user.")
+    ls_close_session(RUN$S, RUN$job)
+    RUN$job <- NULL; RUN$state <- "stopped"; run_bump(); sync_run()
   })
   observeEvent(input$extend_btn, {
     req(rv$S, !isTRUE(rv$S$closed))
     rv$S$total_runs <- rv$S$total_runs + max(1, round(ls_num(input$extend_n, 1)))
     ls_log(rv$S, sprintf("Extended to %d runs.", rv$S$total_runs))
-    rv$tick <- rv$tick + 1
+    run_bump(); sync_run()
   })
   observeEvent(input$rescore_btn, {
     S <- rv$S
@@ -799,7 +818,7 @@ server <- function(input, output, session) {
       ls_update_objectives(S, objectives(), input$roi_objective, input$revenue_objective); TRUE
     }, error = function(e) { showNotification(paste("Re-score failed:", conditionMessage(e)), type = "error"); FALSE })
     if (ok) showNotification(sprintf("Re-scored %d runs with the current objectives.", nrow(S$results)), type = "message")
-    rv$tick <- rv$tick + 1
+    run_bump(); sync_run()
   })
 
   # Surface run diagnostics (e.g. Ecospace not picking up the new maps) as they appear
@@ -811,10 +830,28 @@ server <- function(input, output, session) {
     }
   })
 
-  session$onSessionEnded(function() {
-    S <- isolate(rv$S)
-    if (!is.null(S) && !isTRUE(S$closed)) ls_close_session(S, isolate(rv$job))
+  # This page shows the process-level session: copy its state in, about once a second
+  sync_run <- function() {
+    if (!identical(isolate(rv$tick), RUN$tick) || !identical(isolate(rv$state), RUN$state)) {
+      rv$S <- RUN$S; rv$job <- RUN$job; rv$state <- RUN$state; rv$tick <- RUN$tick
+    }
+    n <- length(RUN$notices); seen <- isolate(rv$notices_seen)
+    if (n > seen) {
+      for (k in (seen + 1):n) showNotification(RUN$notices[[k]]$msg, type = RUN$notices[[k]]$type,
+                                               duration = if (RUN$notices[[k]]$type == "error") NULL else 5)
+      rv$notices_seen <- n
+    } else if (n < seen) rv$notices_seen <- n
+  }
+  observe({
+    invalidateLater(if (RUN$state %in% c("running", "pausing") && isTRUE(RUN$S$cfg$search$dry_run)) 300 else 1000)
+    isolate(sync_run())
   })
+  # A page opened while a session runs (e.g. after the browser closed the tab) goes straight to it
+  if (RUN$state %in% c("running", "paused", "pausing")) {
+    rv$notices_seen <- length(RUN$notices)
+    session$onFlushed(function() nav_select("nav", "Live solver"), once = TRUE)
+  }
+  # Closing or reloading the page does not stop the session; Stop & restore or closing R does
 
   # Live outputs ----
   results <- reactive({
