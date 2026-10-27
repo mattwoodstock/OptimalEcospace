@@ -1,0 +1,27 @@
+{
+  "strategy": {
+    "type": "mixed",
+    "shared_budget": true
+  },
+  "install": {
+    "budget": 5000000,
+    "budget_min": 1000000,
+    "budget_sampling": "uniform",
+    "xmin": -87.51
+  },
+  "decom": {
+    "budget": 5000000,
+    "cost_source": "depth",
+    "fixed_cost": 50000,
+    "depth_cost_rate": 1000,
+    "xmin": -87.51,
+    "min_n": 1,
+    "max_n": 25,
+    "removal_fraction": 1.0
+  },
+  "search": {
+    "iterations": 100,
+    "algorithm": "random",
+    "seed": 1249
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "strategy": {
+    "type": "decommission"
+  },
+  "decom": {
+    "budget": 10000000,
+    "cost_source": "depth",
+    "fixed_cost": 30000,
+    "depth_cost_rate": 600,
+    "xmin": -87.51,
+    "selection": "deepest",
+    "restore": "proportional",
+    "min_n": 1,
+    "max_n": 10,
+    "removal_fraction": 0.5
+  },
+  "search": {
+    "iterations": 100,
+    "algorithm": "random",
+    "seed": 1213
+  }
+}

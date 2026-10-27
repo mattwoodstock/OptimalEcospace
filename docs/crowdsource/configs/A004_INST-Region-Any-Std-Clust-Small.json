@@ -1,0 +1,17 @@
+{
+  "strategy": {
+    "type": "install"
+  },
+  "install": {
+    "budget": 1000000,
+    "budget_min": 100000,
+    "budget_sampling": "uniform",
+    "enforce_connectivity": true,
+    "connectivity_bonus": 10
+  },
+  "search": {
+    "iterations": 100,
+    "algorithm": "random",
+    "seed": 1004
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "strategy": {
+    "type": "install"
+  },
+  "install": {
+    "budget": 15000000,
+    "budget_min": 5000000,
+    "budget_sampling": "uniform",
+    "unit_cost": 12000,
+    "unit_footprint_m2": 20,
+    "unit_height_m": 6,
+    "enforce_connectivity": false
+  },
+  "search": {
+    "iterations": 100,
+    "algorithm": "random",
+    "seed": 1009
+  }
+}
